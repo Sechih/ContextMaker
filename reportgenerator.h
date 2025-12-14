@@ -23,12 +23,24 @@ public:
      */
     struct Options
     {
-        QString rootPath;                 ///< Корневой каталог.
-        QStringList includeExt;           ///< Список разрешённых расширений (с точкой: ".cpp").
-        QStringList excludeDirNames;      ///< Имена папок, которые пропускаются на любом уровне.
-        qint64 maxBytes = 1024 * 1024;    ///< Максимальный размер файла для чтения.
-        bool useCmdTree = false;          ///< Если true и Windows — использовать "tree /F /A" через cmd.
+        QString rootPath;
+        QStringList includeExt;
+        QStringList excludeDirNames;
+        qint64 maxBytes = 1024 * 1024;
+        bool useCmdTree = false;
+
+        /**
+     * @brief Поведение для файлов БЕЗ BOM.
+     */
+        enum class NoBomEncodingMode
+        {
+            AutoUtf8ThenAnsi,  ///< Как сейчас: strict UTF‑8, иначе fallback ANSI (system)
+            ForceAnsi          ///< Игнорировать попытку UTF‑8 и читать как ANSI (system)
+        };
+
+        NoBomEncodingMode noBomEncodingMode = NoBomEncodingMode::AutoUtf8ThenAnsi;
     };
+
 
     explicit ReportGenerator(const Options& opt);
 

@@ -10,6 +10,7 @@
 #include <QProcess>
 #include <QtGlobal>
 #include <algorithm>
+#include <utility>  // std::as_const
 
 /**
  * @brief Утилита: безопасно получить имя директории по абсолютному пути.
@@ -23,7 +24,7 @@ ReportGenerator::ReportGenerator(const Options& opt)
     : m_opt(opt)
 {
     // Нормализуем набор расширений.
-    for (const QString& ext : m_opt.includeExt)
+    for (const QString& ext : std::as_const(m_opt.includeExt))
     {
         QString e = ext.trimmed();
         if (!e.isEmpty() && !e.startsWith('.'))
@@ -31,9 +32,13 @@ ReportGenerator::ReportGenerator(const Options& opt)
         m_includeSet.insert(e.toLower());
     }
 
-    // Нормализуем исключаемые папки (сравнение по имени папки).
-    for (const QString& name : m_opt.excludeDirNames)
-        m_excludeSet.insert(name.trimmed());
+    for (const QString& name : std::as_const(m_opt.excludeDirNames))
+    {
+        const QString n = name.trimmed();
+        if (!n.isEmpty())
+            m_excludeSet.insert(n.toLower());  // <-- лучше сразу lower, как PowerShell (case-insensitive)
+    }
+
 }
 
 QString ReportGenerator::generate(QString* errorOut) const
@@ -46,7 +51,7 @@ QString ReportGenerator::generate(QString* errorOut) const
 
     const QString root = QDir::cleanPath(m_opt.rootPath);
 
-    if (!QFileInfo(root).exists() || !QFileInfo(root).isDir())
+    if (!QFileInfo::exists(root) || !QFileInfo(root).isDir())
     {
         if (errorOut) *errorOut = QStringLiteral("Каталог не найден: %1").arg(root);
         return {};
@@ -58,7 +63,8 @@ QString ReportGenerator::generate(QString* errorOut) const
 
     // Если корневая папка сама в списке исключений — отчёт будет пустым (как в PS-скрипте).
     const QString rootName = QFileInfo(root).fileName();
-    const bool rootExcluded = m_excludeSet.contains(rootName);
+    const bool rootExcluded = m_excludeSet.contains(rootName.toLower());
+
 
 #ifdef Q_OS_WIN
     const bool onWindows = true;
@@ -110,7 +116,7 @@ QString ReportGenerator::generate(QString* errorOut) const
 
         const QDir rootDir(root);
 
-        for (const QFileInfo& f : files)
+        for (const QFileInfo& f : std::as_const(files))
         {
             const QString abs = f.absoluteFilePath();
             QString rel = rootDir.relativeFilePath(abs);
@@ -142,7 +148,7 @@ bool ReportGenerator::isUnderExcluded(const QFileInfo& item) const
 
     while (true)
     {
-        const QString name = dirNameFromPath(dir.absolutePath());
+        const QString name = dirNameFromPath(dir.absolutePath()).toLower();
         if (!name.isEmpty() && m_excludeSet.contains(name))
             return true;
 
@@ -196,6 +202,11 @@ QString ReportGenerator::readTextSmart(const QString& path, QString* errorOut) c
         return true;
     };
 
+    // --- Режим "принудительно ANSI" применяется только если BOM не найден ---
+    if (m_opt.noBomEncodingMode == Options::NoBomEncodingMode::ForceAnsi)
+        return QString::fromLocal8Bit(bytes);
+
+
     // UTF-8 BOM
     if (startsWith({0xEF, 0xBB, 0xBF}))
         return QString::fromUtf8(bytes.constData() + 3, bytes.size() - 3);
@@ -204,9 +215,11 @@ QString ReportGenerator::readTextSmart(const QString& path, QString* errorOut) c
     if (startsWith({0xFF, 0xFE, 0x00, 0x00}))
     {
         const QByteArray payload = bytes.mid(4);
-        const int n = payload.size() / 4;
-        QVector<uint> cps;
-        cps.reserve(n);
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        QVector<char32_t> cps;
+        cps.reserve(payload.size() / 4);
+
         for (int i = 0; i + 3 < payload.size(); i += 4)
         {
             const uint cp =
@@ -214,18 +227,39 @@ QString ReportGenerator::readTextSmart(const QString& path, QString* errorOut) c
                 ((uint)(unsigned char)payload[i + 1] << 8) |
                 ((uint)(unsigned char)payload[i + 2] << 16) |
                 ((uint)(unsigned char)payload[i + 3] << 24);
+
+            cps.push_back(static_cast<char32_t>(cp));
+        }
+
+        return QString::fromUcs4(cps.constData(), cps.size());
+#else
+        QVector<uint> cps;
+        cps.reserve(payload.size() / 4);
+
+        for (int i = 0; i + 3 < payload.size(); i += 4)
+        {
+            const uint cp =
+                (uint)(unsigned char)payload[i] |
+                ((uint)(unsigned char)payload[i + 1] << 8) |
+                ((uint)(unsigned char)payload[i + 2] << 16) |
+                ((uint)(unsigned char)payload[i + 3] << 24);
+
             cps.push_back(cp);
         }
+
         return QString::fromUcs4(cps.constData(), cps.size());
+#endif
     }
 
     // UTF-32 BE BOM: 00 00 FE FF
     if (startsWith({0x00, 0x00, 0xFE, 0xFF}))
     {
         const QByteArray payload = bytes.mid(4);
-        const int n = payload.size() / 4;
-        QVector<uint> cps;
-        cps.reserve(n);
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        QVector<char32_t> cps;
+        cps.reserve(payload.size() / 4);
+
         for (int i = 0; i + 3 < payload.size(); i += 4)
         {
             const uint cp =
@@ -233,38 +267,104 @@ QString ReportGenerator::readTextSmart(const QString& path, QString* errorOut) c
                 ((uint)(unsigned char)payload[i + 1] << 16) |
                 ((uint)(unsigned char)payload[i + 2] << 8) |
                 (uint)(unsigned char)payload[i + 3];
+
+            cps.push_back(static_cast<char32_t>(cp));
+        }
+
+        return QString::fromUcs4(cps.constData(), cps.size());
+#else
+        QVector<uint> cps;
+        cps.reserve(payload.size() / 4);
+
+        for (int i = 0; i + 3 < payload.size(); i += 4)
+        {
+            const uint cp =
+                ((uint)(unsigned char)payload[i] << 24) |
+                ((uint)(unsigned char)payload[i + 1] << 16) |
+                ((uint)(unsigned char)payload[i + 2] << 8) |
+                (uint)(unsigned char)payload[i + 3];
+
             cps.push_back(cp);
         }
+
         return QString::fromUcs4(cps.constData(), cps.size());
+#endif
     }
+
 
     // UTF-16 LE BOM: FF FE
     if (startsWith({0xFF, 0xFE}))
     {
         const QByteArray payload = bytes.mid(2);
-        QVector<ushort> u16;
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        QVector<char16_t> u16;
         u16.reserve(payload.size() / 2);
+
         for (int i = 0; i + 1 < payload.size(); i += 2)
         {
-            const ushort cu = (ushort)((unsigned char)payload[i] | ((unsigned char)payload[i + 1] << 8));
+            const char16_t cu = static_cast<char16_t>(
+                (unsigned char)payload[i] |
+                ((unsigned char)payload[i + 1] << 8)
+                );
             u16.push_back(cu);
         }
+
         return QString::fromUtf16(u16.constData(), u16.size());
+#else
+        QVector<ushort> u16;
+        u16.reserve(payload.size() / 2);
+
+        for (int i = 0; i + 1 < payload.size(); i += 2)
+        {
+            const ushort cu = (ushort)(
+                (unsigned char)payload[i] |
+                ((unsigned char)payload[i + 1] << 8)
+                );
+            u16.push_back(cu);
+        }
+
+        return QString::fromUtf16(u16.constData(), u16.size());
+#endif
     }
+
 
     // UTF-16 BE BOM: FE FF
     if (startsWith({0xFE, 0xFF}))
     {
         const QByteArray payload = bytes.mid(2);
-        QVector<ushort> u16;
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        QVector<char16_t> u16;
         u16.reserve(payload.size() / 2);
+
         for (int i = 0; i + 1 < payload.size(); i += 2)
         {
-            const ushort cu = (ushort)(((unsigned char)payload[i] << 8) | (unsigned char)payload[i + 1]);
+            const char16_t cu = static_cast<char16_t>(
+                ((unsigned char)payload[i] << 8) |
+                (unsigned char)payload[i + 1]
+                );
             u16.push_back(cu);
         }
+
         return QString::fromUtf16(u16.constData(), u16.size());
+#else
+        QVector<ushort> u16;
+        u16.reserve(payload.size() / 2);
+
+        for (int i = 0; i + 1 < payload.size(); i += 2)
+        {
+            const ushort cu = (ushort)(
+                ((unsigned char)payload[i] << 8) |
+                (unsigned char)payload[i + 1]
+                );
+            u16.push_back(cu);
+        }
+
+        return QString::fromUtf16(u16.constData(), u16.size());
+#endif
     }
+
 
     // --- UTF-8 без BOM (строго) ---
     if (isValidUtf8(bytes))
@@ -286,7 +386,7 @@ void ReportGenerator::showTreeRec(const QString& path, const QString& indent, QS
     // Фильтрация по исключаемым папкам (на любом уровне).
     QFileInfoList filtered;
     filtered.reserve(items.size());
-    for (const QFileInfo& it : items)
+    for (const QFileInfo& it : std::as_const(items))
     {
         if (isUnderExcluded(it))
             continue;
@@ -364,7 +464,7 @@ void ReportGenerator::collectFilesRec(const QString& dirPath, QVector<QFileInfo>
     );
 
     // Сортировка не нужна на этом этапе — отсортируем общий список в generate().
-    for (const QFileInfo& it : entries)
+    for (const QFileInfo& it : std::as_const(entries))
     {
         // Пропуск: всё, что находится под исключаемыми папками.
         if (isUnderExcluded(it))

@@ -7,7 +7,139 @@
 #include <QMessageBox>
 #include <QDir>
 #include <QApplication>
+#include <QRegularExpression>
+#include <QSet>
+#include <QRegularExpression>
+#include <QRegularExpressionValidator>
+#include <limits>
 
+
+
+
+/**
+ * @brief Парсит строку размера (например: "1MB", "512KB", "2.5MiB") в байты.
+ * @details
+ *  Используются бинарные множители как в PowerShell (1MB = 1024*1024).
+ *  Поддерживаемые суффиксы (без учёта регистра):
+ *   - B (или без суффикса) -> байты
+ *   - K, KB, KiB -> 1024
+ *   - M, MB, MiB -> 1024^2
+ *   - G, GB, GiB -> 1024^3
+ *   - T, TB, TiB -> 1024^4
+ *
+ * @param text Входной текст.
+ * @param bytesOut Результат в байтах.
+ * @param errorOut (опционально) текст ошибки.
+ * @return true если распознано.
+ */
+static bool parseHumanSizeToBytes(QString text, qint64* bytesOut, QString* errorOut = nullptr)
+{
+    if (bytesOut) *bytesOut = 0;
+
+    text = text.trimmed();
+    if (text.isEmpty())
+    {
+        if (errorOut) *errorOut = QStringLiteral("пустая строка");
+        return false;
+    }
+
+    // Для русской раскладки: "1,5MB" -> "1.5MB"
+    text.replace(',', '.');
+
+    const QRegularExpression re(QStringLiteral(R"(^\s*([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z]*)\s*$)"));
+    const auto m = re.match(text);
+    if (!m.hasMatch())
+    {
+        if (errorOut) *errorOut = QStringLiteral("неверный формат. Пример: 1MB, 512KB, 2.5MiB");
+        return false;
+    }
+
+    bool ok = false;
+    const double value = m.captured(1).toDouble(&ok);
+    if (!ok || value <= 0.0)
+    {
+        if (errorOut) *errorOut = QStringLiteral("число должно быть > 0");
+        return false;
+    }
+
+    QString suf = m.captured(2).trimmed().toLower();
+
+    long double mul = 1.0L;
+    if (suf.isEmpty() || suf == "b" || suf == "byte" || suf == "bytes")
+        mul = 1.0L;
+    else if (suf == "k" || suf == "kb" || suf == "kib")
+        mul = 1024.0L;
+    else if (suf == "m" || suf == "mb" || suf == "mib")
+        mul = 1024.0L * 1024.0L;
+    else if (suf == "g" || suf == "gb" || suf == "gib")
+        mul = 1024.0L * 1024.0L * 1024.0L;
+    else if (suf == "t" || suf == "tb" || suf == "tib")
+        mul = 1024.0L * 1024.0L * 1024.0L * 1024.0L;
+    else
+    {
+        if (errorOut) *errorOut = QStringLiteral("неизвестный суффикс: %1").arg(suf);
+        return false;
+    }
+
+    const long double bytesLd = (long double)value * mul;
+
+    if (bytesLd > (long double)std::numeric_limits<qint64>::max())
+    {
+        if (errorOut) *errorOut = QStringLiteral("слишком большое значение");
+        return false;
+    }
+
+    // Округляем до ближайшего целого байта.
+    const qint64 bytes = (qint64)(bytesLd + 0.5L);
+    if (bytes <= 0)
+    {
+        if (errorOut) *errorOut = QStringLiteral("получилось <= 0 байт");
+        return false;
+    }
+
+    if (bytesOut) *bytesOut = bytes;
+    return true;
+}
+
+
+/**
+ * @brief Разбирает пользовательский список из текстового поля.
+ * @details
+ *  Разделители: перевод строки, пробелы/табы, запятая, точка с запятой.
+ *  Пустые элементы игнорируются, дубликаты убираются (с сохранением порядка).
+ *
+ * @param text Исходный текст из QPlainTextEdit/QTextEdit.
+ * @param forceDotPrefix Если true — для элементов будет гарантирована точка в начале (для расширений).
+ * @param toLower Если true — приводим к нижнему регистру (удобно для сравнения как в PowerShell).
+ */
+static QStringList parseUserList(const QString& text, bool forceDotPrefix, bool toLower)
+{
+    const QStringList tokens = text.split(QRegularExpression(QStringLiteral(R"([\s,;]+)")),
+                                          Qt::SkipEmptyParts);
+
+    QStringList out;
+    QSet<QString> seen;
+
+    for (QString t : tokens)
+    {
+        t = t.trimmed();
+        if (t.isEmpty())
+            continue;
+
+        if (forceDotPrefix && !t.startsWith('.'))
+            t.prepend('.');
+
+        if (toLower)
+            t = t.toLower();
+
+        if (!seen.contains(t))
+        {
+            seen.insert(t);
+            out.push_back(t);
+        }
+    }
+    return out;
+}
 
 
 /**
@@ -43,6 +175,21 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+
+
+    // --- Дефолтные значения настроек (как в PowerShell-скрипте) ---
+    // Разрешаем ввод вида: 1MB, 512KB, 2.5MiB и т.п.
+    auto* v = new QRegularExpressionValidator(
+        QRegularExpression(QStringLiteral(R"(^\s*\d+([.,]\d+)?\s*(B|KB|MB|GB|TB|K|M|G|T|KiB|MiB|GiB|TiB)?\s*$)"),
+                           QRegularExpression::CaseInsensitiveOption),
+        ui->leMaxBytes
+        );
+    ui->leMaxBytes->setValidator(v);
+    ui->leMaxBytes->setText(QStringLiteral("1MB"));
+
+    ui->pteIncludeExt->setPlainText(defaultIncludeExt().join('\n'));
+    ui->pteExcludeDir->setPlainText(defaultExcludeDirs().join('\n'));
+
 
     // Подключаем кнопки.
     connect(ui->pbOpen, &QPushButton::clicked, this, &MainWindow::onOpenClicked);
@@ -106,12 +253,49 @@ void MainWindow::onBuildClicked()
     }
 
     // Параметры генерации. При желании можно вынести в UI.
+    // ReportGenerator::Options opt;
+    // opt.rootPath = m_rootDir;
+    // opt.includeExt = defaultIncludeExt();
+    // opt.excludeDirNames = defaultExcludeDirs();
+    // opt.maxBytes = 1024 * 1024;
+    // Параметры генерации из UI
     ReportGenerator::Options opt;
     opt.rootPath = m_rootDir;
-    opt.includeExt = defaultIncludeExt();
-    opt.excludeDirNames = defaultExcludeDirs();
-    opt.maxBytes = 1024 * 1024;
+
+    opt.noBomEncodingMode =
+        (ui->cbEncodingMode->currentIndex() == 1)
+            ? ReportGenerator::Options::NoBomEncodingMode::ForceAnsi
+            : ReportGenerator::Options::NoBomEncodingMode::AutoUtf8ThenAnsi;
+
+
+    qint64 maxBytes = 0;
+    QString sizeErr;
+    if (!parseHumanSizeToBytes(ui->leMaxBytes->text(), &maxBytes, &sizeErr))
+    {
+        QMessageBox::warning(this,
+                             QStringLiteral("Неверный MaxBytes"),
+                             QStringLiteral("Не удалось разобрать MaxBytes: %1\nПример: 1MB, 512KB, 2.5MiB")
+                                 .arg(sizeErr));
+        return;
+    }
+    opt.maxBytes = maxBytes;
+
+
+    opt.includeExt = parseUserList(ui->pteIncludeExt->toPlainText(), /*forceDotPrefix*/true,  /*toLower*/true);
+    if (opt.includeExt.isEmpty())
+        opt.includeExt = defaultIncludeExt();
+
+    opt.excludeDirNames = parseUserList(ui->pteExcludeDir->toPlainText(), /*forceDotPrefix*/false, /*toLower*/true);
+    if (opt.excludeDirNames.isEmpty())
+        opt.excludeDirNames = defaultExcludeDirs();
+
+    // ВАЖНО:
+    // Если ты сознательно сделал инверсию — оставь как у тебя.
+    // Если нет — должно быть: opt.useCmdTree = ui->cbUseCmdTree->isChecked();
     opt.useCmdTree = !ui->cbUseCmdTree->isChecked();
+
+
+
 
     ReportGenerator gen(opt);
 
@@ -213,3 +397,4 @@ void MainWindow::onReportContextMenuRequested(const QPoint& pos)
 
     menu.exec(ui->teReprt->mapToGlobal(pos));
 }
+

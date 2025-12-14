@@ -21,10 +21,23 @@
        <string>GroupBox</string>
       </property>
       <layout class="QGridLayout" name="gridLayout_2">
+       <item row="1" column="1">
+        <widget class="QPlainTextEdit" name="pteExcludeDir"/>
+       </item>
        <item row="0" column="2">
         <widget class="QPushButton" name="pbSave">
          <property name="text">
           <string>Сохранить</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="3">
+        <widget class="QCheckBox" name="cbUseCmdTree">
+         <property name="text">
+          <string>tree /F /A (cmd)</string>
+         </property>
+         <property name="checked">
+          <bool>true</bool>
          </property>
         </widget>
        </item>
@@ -35,6 +48,19 @@
          </property>
         </widget>
        </item>
+       <item row="0" column="4">
+        <widget class="QLineEdit" name="leMaxBytes">
+         <property name="toolTip">
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;“Пример: 512KB, 1MB, 2.5MB, 1GiB”&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+         </property>
+         <property name="text">
+          <string>1MB</string>
+         </property>
+         <property name="placeholderText">
+          <string>1MB</string>
+         </property>
+        </widget>
+       </item>
        <item row="0" column="0">
         <widget class="QPushButton" name="pbOpen">
          <property name="text">
@@ -42,26 +68,13 @@
          </property>
         </widget>
        </item>
-       <item row="0" column="4">
-        <spacer name="horizontalSpacer">
-         <property name="orientation">
-          <enum>Qt::Orientation::Horizontal</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>40</width>
-           <height>20</height>
-          </size>
-         </property>
-        </spacer>
+       <item row="1" column="0">
+        <widget class="QPlainTextEdit" name="pteIncludeExt"/>
        </item>
-       <item row="0" column="3">
-        <widget class="QCheckBox" name="cbUseCmdTree">
-         <property name="text">
-          <string>tree /F /A (cmd)</string>
-         </property>
-         <property name="checked">
-          <bool>true</bool>
+       <item row="0" column="5">
+        <widget class="QComboBox" name="cbEncodingMode">
+         <property name="toolTip">
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Авто: BOM → UTF‑8 → ANSI,&lt;/p&gt;&lt;p&gt;Принудительно ANSI (system)&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
          </property>
         </widget>
        </item>
