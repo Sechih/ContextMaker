@@ -795,64 +795,66 @@ QString ReportGenerator::readDocxText(const QString& docxPath, QString* errorOut
 #endif
 }
 
-
 QString ReportGenerator::readFileForReport(const QFileInfo& file, QString* errorOut) const
 {
     const QString suf = file.suffix().toLower();
     const QString ext = suf.isEmpty() ? QString() : QStringLiteral(".%1").arg(suf);
 
+    QString text;
+
     if (ext == QStringLiteral(".doc"))
     {
-        return QStringLiteral("[Файл .DOC: извлечение текста не реализовано. "
+        text = QStringLiteral("[Файл .DOC: извлечение текста не реализовано. "
                               "Рекомендуется конвертировать в .DOCX или .TXT.]");
     }
-
-    if (ext == QStringLiteral(".docx"))
+    else if (ext == QStringLiteral(".docx"))
     {
         QString err;
-        const QString text = readDocxText(file.absoluteFilePath(), &err);
+        text = readDocxText(file.absoluteFilePath(), &err);
         if (!err.isEmpty())
         {
             if (errorOut) *errorOut = err;
             return {};
         }
-        return text;
     }
-
-    if (ext == QStringLiteral(".pdf"))
+    else if (ext == QStringLiteral(".pdf"))
     {
         QString err;
-        const QString text = readPdfText(file.absoluteFilePath(), &err);
+        text = readPdfText(file.absoluteFilePath(), &err);
         if (!err.isEmpty())
         {
             if (errorOut) *errorOut = err;
             return {};
         }
-        return text;
     }
-
-    if (ext == QStringLiteral(".xls"))
+    else if (ext == QStringLiteral(".xls"))
     {
-        return QStringLiteral("[Файл .XLS: старый бинарный формат Excel. "
+        text = QStringLiteral("[Файл .XLS: старый бинарный формат Excel. "
                               "Извлечение текста не реализовано. "
                               "Сохраните как .XLSX или .CSV.]");
     }
-
-    if (ext == QStringLiteral(".xlsx") || ext == QStringLiteral(".xlsm"))
+    else if (ext == QStringLiteral(".xlsx") || ext == QStringLiteral(".xlsm"))
     {
         QString err;
-        const QString text = readXlsxText(file.absoluteFilePath(), &err);
+        text = readXlsxText(file.absoluteFilePath(), &err);
         if (!err.isEmpty())
         {
             if (errorOut) *errorOut = err;
             return {};
         }
-        return text;
+    }
+    else
+    {
+        text = readTextSmart(file.absoluteFilePath(), errorOut);
     }
 
-    // Обычные текстовые файлы
-    return readTextSmart(file.absoluteFilePath(), errorOut);
+    // ✅ Единый лимит вывода для любого файла (0 = без лимита)
+    truncateWithNote(text, m_opt.maxOutChars,
+                     QStringLiteral("[ОБРЕЗАНО: превышен лимит вывода текста]"));
+
+    return text.trimmed();
 }
+
 
 QString ReportGenerator::readPdfText(const QString& pdfPath, QString* errorOut) const
 {

@@ -155,7 +155,8 @@ static QStringList defaultIncludeExt()
         ".doc",".docx",".pdf",
         // Excel
         ".xls",".xlsx",".xlsm",
-
+        // Qt Designer
+        ".ui", ".qrc", ".ts", ".qss", ".pri", ".pro",
         // Скрипты/текст
         ".ps1",".psm1",".psd1",".bat",".cmd",
         ".txt",".md",".json",".xml",".yaml",".yml",".csv",".ini",".config",
