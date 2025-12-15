@@ -28,7 +28,20 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
     qt_add_executable(ContextMaker
         MANUAL_FINALIZATION
         ${PROJECT_SOURCES}
+        resources/app_resources.qrc
+        appicon.rc
+
+
     )
+
+
+#/** \brief Вшиваем иконку в EXE на Windows (через .rc). */
+if(WIN32)
+    target_sources(ContextMaker PRIVATE appicon.rc)
+endif()
+
+
+
 # Define target properties for Android with Qt 6 as:
 #    set_property(TARGET ContextMaker APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
 #                 ${CMAKE_CURRENT_SOURCE_DIR}/android)

@@ -1,0 +1,3 @@
+// appicon.rc
+// Вшиваем иконку в exe (Explorer/ярлыки берут её отсюда)
+IDI_APP_ICON ICON "resources/icons/documents_papers_sheets_icon_187064 for exe.ico"

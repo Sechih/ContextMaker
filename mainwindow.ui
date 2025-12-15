@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>800</width>
-    <height>600</height>
+    <height>687</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -15,40 +15,36 @@
   </property>
   <widget class="QWidget" name="centralwidget">
    <layout class="QGridLayout" name="gridLayout">
+    <item row="1" column="0">
+     <widget class="QTextEdit" name="teReprt"/>
+    </item>
     <item row="0" column="0">
      <widget class="QGroupBox" name="groupBox">
+      <property name="sizePolicy">
+       <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+        <horstretch>0</horstretch>
+        <verstretch>0</verstretch>
+       </sizepolicy>
+      </property>
       <property name="title">
-       <string>GroupBox</string>
+       <string/>
       </property>
       <layout class="QGridLayout" name="gridLayout_2">
-       <item row="1" column="1">
-        <widget class="QPlainTextEdit" name="pteExcludeDir"/>
-       </item>
        <item row="0" column="2">
-        <widget class="QPushButton" name="pbSave">
-         <property name="text">
-          <string>Сохранить</string>
-         </property>
-        </widget>
-       </item>
-       <item row="0" column="3">
-        <widget class="QCheckBox" name="cbUseCmdTree">
-         <property name="text">
-          <string>tree /F /A (cmd)</string>
-         </property>
-         <property name="checked">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item row="0" column="1">
         <widget class="QPushButton" name="pbBuild">
          <property name="text">
           <string>Собрать отчет</string>
          </property>
         </widget>
        </item>
-       <item row="0" column="4">
+       <item row="4" column="2">
+        <widget class="QLabel" name="label_2">
+         <property name="text">
+          <string>Исключить каталоги в отчете:</string>
+         </property>
+        </widget>
+       </item>
+       <item row="2" column="2">
         <widget class="QLineEdit" name="leMaxBytes">
          <property name="toolTip">
           <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;“Пример: 512KB, 1MB, 2.5MB, 1GiB”&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
@@ -61,6 +57,22 @@
          </property>
         </widget>
        </item>
+       <item row="5" column="0">
+        <widget class="QPlainTextEdit" name="pteIncludeExt"/>
+       </item>
+       <item row="3" column="2">
+        <widget class="QCheckBox" name="cbUseCmdTree">
+         <property name="toolTip">
+          <string>Если включено (Windows), дерево будет строиться командой tree /F /A через cmd</string>
+         </property>
+         <property name="text">
+          <string>tree /F /A (cmd)</string>
+         </property>
+         <property name="checked">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
        <item row="0" column="0">
         <widget class="QPushButton" name="pbOpen">
          <property name="text">
@@ -69,20 +81,55 @@
         </widget>
        </item>
        <item row="1" column="0">
-        <widget class="QPlainTextEdit" name="pteIncludeExt"/>
+        <widget class="QPushButton" name="pbSave">
+         <property name="text">
+          <string>Сохранить</string>
+         </property>
+        </widget>
        </item>
-       <item row="0" column="5">
+       <item row="2" column="0">
         <widget class="QComboBox" name="cbEncodingMode">
          <property name="toolTip">
-          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Авто: BOM → UTF‑8 → ANSI,&lt;/p&gt;&lt;p&gt;Принудительно ANSI (system)&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Авто: BOM → UTF‑8 → ANSI,&lt;/p&gt;&lt;p&gt;Принудительно ANSI (system)&lt;/p&gt;&lt;p&gt;байты &lt;span style=&quot; font-weight:700;&quot;&gt;CP1251 могут быть “валидными UTF‑8”&lt;/span&gt;, и тогда strict‑проверка пропустит их как UTF‑8 → получишь “кракозябры”&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+         </property>
+         <item>
+          <property name="text">
+           <string>Авто: BOM → UTF‑8 → ANSI</string>
+          </property>
+         </item>
+         <item>
+          <property name="text">
+           <string>Принудительно ANSI (system)</string>
+          </property>
+         </item>
+        </widget>
+       </item>
+       <item row="1" column="2">
+        <widget class="QLabel" name="label_3">
+         <property name="text">
+          <string>Ограничение размера файла при сборке:</string>
+         </property>
+        </widget>
+       </item>
+       <item row="5" column="2">
+        <widget class="QPlainTextEdit" name="pteExcludeDir"/>
+       </item>
+       <item row="4" column="0">
+        <widget class="QLabel" name="label">
+         <property name="text">
+          <string>Список поддерживаемых расширений:</string>
+         </property>
+        </widget>
+       </item>
+       <item row="3" column="0">
+        <widget class="QLabel" name="label_4">
+         <property name="text">
+          <string>Построить дерево каталогов и файлов:</string>
          </property>
         </widget>
        </item>
       </layout>
      </widget>
-    </item>
-    <item row="1" column="0">
-     <widget class="QTextEdit" name="teReprt"/>
     </item>
    </layout>
   </widget>
@@ -92,7 +139,7 @@
      <x>0</x>
      <y>0</y>
      <width>800</width>
-     <height>21</height>
+     <height>25</height>
     </rect>
    </property>
   </widget>

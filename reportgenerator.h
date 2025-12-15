@@ -105,4 +105,20 @@ private:
      * @param data Байты.
      */
     static bool isValidUtf8(const QByteArray& data);
+    /**
+     * @brief Читает файл “по-умному” для вставки в отчёт.
+     * @details
+     *  - .docx: попытка извлечь текст
+     *  - .doc: текст не извлекаем (сообщение)
+     *  - остальное: readTextSmart()
+     */
+    QString readFileForReport(const QFileInfo& file, QString* errorOut = nullptr) const;
+
+    /**
+     * @brief Извлекает текст из DOCX.
+     * @details Реализация для Windows: распаковка через PowerShell Expand-Archive
+     *          и чтение word/document.xml.
+     */
+    QString readDocxText(const QString& docxPath, QString* errorOut = nullptr) const;
+
 };

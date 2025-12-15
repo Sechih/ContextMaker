@@ -12,6 +12,8 @@
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
 #include <limits>
+#include <QClipboard>
+#include <QGuiApplication>
 
 
 
@@ -148,7 +150,7 @@ static QStringList parseUserList(const QString& text, bool forceDotPrefix, bool 
 static QStringList defaultIncludeExt()
 {
     return {
-        ".ps1",".psm1",".psd1",".bat",".cmd",
+        ".doc",".docx",".ps1",".psm1",".psd1",".bat",".cmd",
         ".txt",".md",".json",".xml",".yaml",".yml",".csv",".ini",".config",
         ".cs",".vb",".fs",".cpp",".hpp",".c",".h",
         ".py",".rb",".go",".ts",".tsx",".js",".jsx",".html",".css"
@@ -175,6 +177,17 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+    setWindowTitle(tr("ContextMaker"));
+
+
+    ui->teReprt->setReadOnly(true);
+
+    // Небольшой стиль для ``` блоков (работает при setMarkdown)
+    ui->teReprt->document()->setDefaultStyleSheet(
+        "code, pre { font-family: Consolas, 'Courier New', monospace; }"
+        "pre { background-color: rgba(127,127,127,0.15); padding: 6px; }"
+        );
+
 
 
     // --- Дефолтные значения настроек (как в PowerShell-скрипте) ---
@@ -215,8 +228,9 @@ MainWindow::~MainWindow()
 void MainWindow::refreshUiState()
 {
     ui->pbBuild->setEnabled(!m_rootDir.isEmpty());
-    ui->pbSave->setEnabled(!ui->teReprt->toPlainText().isEmpty());
+    ui->pbSave->setEnabled(!m_reportMarkdown.isEmpty());
 }
+
 
 void MainWindow::setStatus(const QString& text)
 {
@@ -324,13 +338,27 @@ void MainWindow::onBuildClicked()
         setStatus(QStringLiteral("Отчёт готов."));
     }
 
-    ui->teReprt->setPlainText(report);
+ //   ui->teReprt->setPlainText(report);
+
+    m_reportMarkdown = report;
+
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+    ui->teReprt->setMarkdown(m_reportMarkdown);
+#else
+    ui->teReprt->setPlainText(m_reportMarkdown); // fallback если Qt старый
+#endif
+
+
     refreshUiState();
 }
 
 void MainWindow::onSaveClicked()
 {
-    const QString text = ui->teReprt->toPlainText();
+    //const QString text = ui->teReprt->toPlainText();
+    const QString text = m_reportMarkdown.isEmpty()
+                             ? ui->teReprt->toPlainText()
+                             : m_reportMarkdown;
+
     if (text.isEmpty())
     {
         QMessageBox::information(this, QStringLiteral("Нечего сохранять"),
@@ -394,6 +422,13 @@ void MainWindow::onReportContextMenuRequested(const QPoint& pos)
     // (Опционально) можно добавить "Выделить всё" — обычно удобно.
     QAction* selectAllAction = menu.addAction(QStringLiteral("Выделить всё"));
     connect(selectAllAction, &QAction::triggered, ui->teReprt, &QTextEdit::selectAll);
+
+    QAction* copyMdAction = menu.addAction(QStringLiteral("Копировать (Markdown)"));
+    copyMdAction->setEnabled(!m_reportMarkdown.isEmpty());
+    connect(copyMdAction, &QAction::triggered, this, [this]() {
+        QGuiApplication::clipboard()->setText(m_reportMarkdown);
+    });
+    menu.addSeparator();
 
     menu.exec(ui->teReprt->mapToGlobal(pos));
 }

@@ -11,6 +11,9 @@
 #include <QtGlobal>
 #include <algorithm>
 #include <utility>  // std::as_const
+#include <QTemporaryDir>
+#include <QXmlStreamReader>
+
 
 /**
  * @brief Утилита: безопасно получить имя директории по абсолютному пути.
@@ -60,6 +63,7 @@ QString ReportGenerator::generate(QString* errorOut) const
     QStringList lines;
     lines << QStringLiteral("# Отчёт по каталогу: %1").arg(root);
     lines << QStringLiteral("## 1. Дерево каталогов и файлов");
+    lines << QStringLiteral("```text");
 
     // Если корневая папка сама в списке исключений — отчёт будет пустым (как в PS-скрипте).
     const QString rootName = QFileInfo(root).fileName();
@@ -74,29 +78,43 @@ QString ReportGenerator::generate(QString* errorOut) const
 
     if (!rootExcluded)
     {
+#ifdef Q_OS_WIN
+        const bool onWindows = true;
+#else
+        const bool onWindows = false;
+#endif
+
         if (m_opt.useCmdTree && onWindows)
         {
             QString treeErr;
             const QString treeOut = runCmdTree(&treeErr);
-            if (!treeOut.isEmpty())
-                lines << treeOut.trimmed();
+            const QString treeOutTrim = treeOut.trimmed();
+
+            if (!treeOutTrim.isEmpty())
+            {
+                lines << treeOutTrim;
+            }
             else
             {
                 // Фолбэк на внутренний генератор дерева.
                 QStringList treeLines;
                 showTreeRec(root, QString(), treeLines);
                 lines << treeLines;
+
                 if (errorOut && !treeErr.isEmpty())
                     *errorOut = treeErr;
             }
         }
         else
         {
+            // Встроенное дерево (без внешних утилит)
             QStringList treeLines;
             showTreeRec(root, QString(), treeLines);
             lines << treeLines;
         }
     }
+
+    lines << QStringLiteral("```");
 
     lines << QString(); // пустая строка
 
@@ -126,7 +144,7 @@ QString ReportGenerator::generate(QString* errorOut) const
             lines << QStringLiteral("----- BEGIN FILE: %1 [%2 bytes] ----").arg(rel).arg(f.size());
 
             QString readErr;
-            const QString content = readTextSmart(abs, &readErr);
+            const QString content = readFileForReport(f, &readErr);
             if (!readErr.isEmpty())
                 lines << QStringLiteral("[ОШИБКА ЧТЕНИЯ: %1]").arg(readErr);
             else
@@ -201,11 +219,6 @@ QString ReportGenerator::readTextSmart(const QString& path, QString* errorOut) c
         }
         return true;
     };
-
-    // --- Режим "принудительно ANSI" применяется только если BOM не найден ---
-    if (m_opt.noBomEncodingMode == Options::NoBomEncodingMode::ForceAnsi)
-        return QString::fromLocal8Bit(bytes);
-
 
     // UTF-8 BOM
     if (startsWith({0xEF, 0xBB, 0xBF}))
@@ -365,6 +378,9 @@ QString ReportGenerator::readTextSmart(const QString& path, QString* errorOut) c
 #endif
     }
 
+    // --- Режим "принудительно ANSI" применяется только если BOM не найден ---
+    if (m_opt.noBomEncodingMode == Options::NoBomEncodingMode::ForceAnsi)
+        return QString::fromLocal8Bit(bytes);
 
     // --- UTF-8 без BOM (строго) ---
     if (isValidUtf8(bytes))
@@ -422,13 +438,21 @@ QString ReportGenerator::runCmdTree(QString* errorOut) const
 {
 #ifdef Q_OS_WIN
     QProcess proc;
-
-    // Важно: принудительно включаем UTF-8 в cmd (chcp 65001), как в PowerShell-скрипте.
-    const QString rootNative = QDir::toNativeSeparators(QDir::cleanPath(m_opt.rootPath));
-    const QString cmdLine = QStringLiteral("chcp 65001>nul & tree \"%1\" /F /A").arg(rootNative);
-
     proc.setProcessChannelMode(QProcess::MergedChannels);
-    proc.start(QStringLiteral("cmd"), QStringList() << QStringLiteral("/c") << cmdLine);
+
+    // Важно: приводим к Windows-виду, но НЕ добавляем никаких лишних слэшей.
+    const QString rootNative = QDir::toNativeSeparators(QDir::cleanPath(m_opt.rootPath));
+
+    /**
+     * @details
+     *  КРИТИЧНО: используем setNativeArguments(), чтобы Qt не экранировал двойные кавычки как \".
+     *  Иначе cmd получает \"C:\...\" и tree видит путь \C:\... (Invalid path).
+     */
+    const QString cmdLine =
+        QStringLiteral("/c chcp 65001>nul & tree \"%1\" /F /A").arg(rootNative);
+
+    proc.setNativeArguments(cmdLine);
+    proc.start(QStringLiteral("cmd.exe"));
 
     if (!proc.waitForStarted())
     {
@@ -438,21 +462,31 @@ QString ReportGenerator::runCmdTree(QString* errorOut) const
 
     proc.waitForFinished(-1);
 
-    const QByteArray out = proc.readAll();
-    if (out.isEmpty())
+    const QByteArray outBytes = proc.readAll();
+    const QString outText = QString::fromUtf8(outBytes);
+
+    if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0)
     {
-        if (errorOut) *errorOut = QStringLiteral("Команда tree не вернула вывод.");
+        if (errorOut)
+            *errorOut = QStringLiteral("Команда tree завершилась с ошибкой (exitCode=%1). Вывод: %2")
+                            .arg(proc.exitCode())
+                            .arg(outText.trimmed());
         return {};
     }
 
-    // Вывод у нас ASCII/UTF-8, т.к. мы сделали chcp 65001.
-    return QString::fromUtf8(out);
+    if (outText.trimmed().isEmpty())
+    {
+        if (errorOut) *errorOut = QStringLiteral("Команда tree не вернула полезного вывода.");
+        return {};
+    }
 
+    return outText;
 #else
     if (errorOut) *errorOut = QStringLiteral("useCmdTree доступен только в Windows.");
     return {};
 #endif
 }
+
 
 void ReportGenerator::collectFilesRec(const QString& dirPath, QVector<QFileInfo>& outFiles) const
 {
@@ -536,4 +570,152 @@ bool ReportGenerator::isValidUtf8(const QByteArray& data)
         i += n;
     }
     return true;
+}
+
+/**
+ * @brief Экранирует строку для вставки в PowerShell-строку в одинарных кавычках.
+ * @details В PowerShell одинарная кавычка экранируется удвоением: ' -> ''.
+ */
+static QString psEscapeSingleQuoted(QString s)
+{
+    return s.replace('\'', "''");
+}
+
+QString ReportGenerator::readDocxText(const QString& docxPath, QString* errorOut) const
+{
+#ifdef Q_OS_WIN
+    QTemporaryDir tmp;
+    if (!tmp.isValid())
+    {
+        if (errorOut) *errorOut = QStringLiteral("Не удалось создать временную папку для распаковки DOCX.");
+        return {};
+    }
+
+    // 1) DOCX = ZIP, но Expand-Archive в PS5 часто требует расширение .zip
+    const QString zipPath = QDir(tmp.path()).filePath(QStringLiteral("docx.zip"));
+    QFile::remove(zipPath);
+    if (!QFile::copy(docxPath, zipPath))
+    {
+        if (errorOut) *errorOut = QStringLiteral("Не удалось скопировать DOCX во временный ZIP для распаковки.");
+        return {};
+    }
+
+    const QString srcZip = psEscapeSingleQuoted(QDir::toNativeSeparators(zipPath));
+    const QString dst    = psEscapeSingleQuoted(QDir::toNativeSeparators(tmp.path()));
+
+    /**
+     * @details
+     *  Устанавливаем UTF-8 для вывода, чтобы ошибки читались нормально.
+     *  (Иначе на русской Windows часто будет OEM-кодировка и “кракозябры”.)
+     */
+    const QString cmd = QStringLiteral(
+                            "$ErrorActionPreference='Stop';"
+                            "$OutputEncoding=[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+                            "Expand-Archive -LiteralPath '%1' -DestinationPath '%2' -Force"
+                            ).arg(srcZip, dst);
+
+    QProcess proc;
+    proc.setProcessChannelMode(QProcess::MergedChannels);
+    proc.start(QStringLiteral("powershell.exe"),
+               QStringList()
+                   << QStringLiteral("-NoProfile")
+                   << QStringLiteral("-NonInteractive")
+                   << QStringLiteral("-ExecutionPolicy") << QStringLiteral("Bypass")
+                   << QStringLiteral("-Command") << cmd);
+
+    proc.waitForFinished(-1);
+
+    if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0)
+    {
+        const QByteArray bytes = proc.readAll();
+        const QString psOut = QString::fromUtf8(bytes);
+        if (errorOut)
+            *errorOut = QStringLiteral("Ошибка извлечения DOCX. %1").arg(psOut.trimmed());
+        return {};
+    }
+
+    // 2) Читаем word/document.xml
+    const QString xmlPath = QDir(tmp.path()).filePath(QStringLiteral("word/document.xml"));
+    QFile xmlFile(xmlPath);
+    if (!xmlFile.open(QIODevice::ReadOnly))
+    {
+        if (errorOut)
+            *errorOut = QStringLiteral("Не найден word/document.xml внутри DOCX или нет доступа: %1").arg(xmlFile.errorString());
+        return {};
+    }
+
+    // 3) Парсим WordprocessingML и вытаскиваем текст
+    QXmlStreamReader xml(&xmlFile);
+    QString out;
+    out.reserve(4096);
+
+    while (!xml.atEnd())
+    {
+        xml.readNext();
+
+        if (xml.isStartElement())
+        {
+            const auto n = xml.name(); // локальное имя без префикса
+            if (n == QStringLiteral("t"))
+            {
+                out += xml.readElementText(QXmlStreamReader::IncludeChildElements);
+            }
+            else if (n == QStringLiteral("tab"))
+            {
+                out += QLatin1Char('\t');
+            }
+            else if (n == QStringLiteral("br") || n == QStringLiteral("cr"))
+            {
+                out += QLatin1Char('\n');
+            }
+        }
+        else if (xml.isEndElement())
+        {
+            if (xml.name() == QStringLiteral("p")) // конец параграфа
+                out += QLatin1Char('\n');
+        }
+    }
+
+    if (xml.hasError())
+    {
+        if (errorOut)
+            *errorOut = QStringLiteral("Ошибка XML при чтении DOCX: %1").arg(xml.errorString());
+        return {};
+    }
+
+    return out.trimmed();
+#else
+    if (errorOut)
+        *errorOut = QStringLiteral("Извлечение текста из .docx сейчас реализовано только для Windows.");
+    return {};
+#endif
+}
+
+
+QString ReportGenerator::readFileForReport(const QFileInfo& file, QString* errorOut) const
+{
+    const QString suf = file.suffix().toLower();
+    const QString ext = suf.isEmpty() ? QString() : QStringLiteral(".%1").arg(suf);
+
+    if (ext == QStringLiteral(".doc"))
+    {
+        // .doc — бинарный формат Word (OLE). Без Word/COM/библиотек корректно не достать текст.
+        return QStringLiteral("[Файл .DOC: извлечение текста не реализовано. "
+                              "Рекомендуется конвертировать в .DOCX или .TXT.]");
+    }
+
+    if (ext == QStringLiteral(".docx"))
+    {
+        QString err;
+        const QString text = readDocxText(file.absoluteFilePath(), &err);
+        if (!err.isEmpty())
+        {
+            if (errorOut) *errorOut = err;
+            return {};
+        }
+        return text;
+    }
+
+    // Обычные текстовые файлы
+    return readTextSmart(file.absoluteFilePath(), errorOut);
 }
