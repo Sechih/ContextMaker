@@ -85,37 +85,6 @@ if(QT_VERSION_MAJOR EQUAL 6)
 endif()
 
 
-# ===================================================================
-#  УНИВЕРСАЛЬНЫЙ БЛОК: install + deploy для Qt‑приложения
-#
-#  Предполагается:
-#    - цель приложения называется ${PROJECT_NAME}
-#    - Qt 6 (для Qt 5 блок с qt_generate_deploy_app_script просто не сработает)
-#    - qt_finalize_executable(${PROJECT_NAME}) больше НИГДЕ в CMakeLists.txt нет
-# ===================================================================
-
-include(GNUInstallDirs)
-
-#/** \brief Куда ставим exe и библиотеки при `cmake --install`. */
-install(TARGETS ${PROJECT_NAME}
-    BUNDLE  DESTINATION .
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-)
-
-#/** \brief Qt 6: генерация скрипта деплоя (windeployqt/macdeployqt и т.п.). */
-if (QT_VERSION_MAJOR EQUAL 6)
-    qt_generate_deploy_app_script(
-        TARGET ${PROJECT_NAME}
-        OUTPUT_SCRIPT qt_deploy_script
-        NO_UNSUPPORTED_PLATFORM_ERROR
-    )
-    #/** \brief Подключаем скрипт деплоя в install. */
-    install(SCRIPT ${qt_deploy_script})
-
-    #/** \brief ВАЖНО: финализируем исполняемый файл ТОЛЬКО здесь. */
-    qt_finalize_executable(${PROJECT_NAME})
-endif()
 
 # ===================================================================
 #/** \brief Удобная цель deploy для Windows. */

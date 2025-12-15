@@ -17,8 +17,14 @@
 #include <QHash>
 #include <QMap>
 #include <QStandardPaths>
-#include <windows.h>
 #include <limits>
+
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 static void truncateWithNote(QString& s, qint64 maxChars, const QString& note)
 {
@@ -540,8 +546,11 @@ QString ReportGenerator::runCmdTree(QString* errorOut) const
      *  КРИТИЧНО: используем setNativeArguments(), чтобы Qt не экранировал двойные кавычки как \".
      *  Иначе cmd получает \"C:\...\" и tree видит путь \C:\... (Invalid path).
      */
+    // const QString cmdLine =
+    //     QStringLiteral("/c chcp 65001>nul & tree \"%1\" /F /A").arg(rootNative);
     const QString cmdLine =
-        QStringLiteral("/c chcp 65001>nul & tree \"%1\" /F /A").arg(rootNative);
+        QStringLiteral("/c tree \"%1\" /F /A").arg(rootNative);
+
 
     proc.setNativeArguments(cmdLine);
     proc.start(QStringLiteral("cmd.exe"));

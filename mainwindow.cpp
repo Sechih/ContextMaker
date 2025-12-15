@@ -358,7 +358,7 @@ void MainWindow::onBuildClicked()
     // ВАЖНО:
     // Если ты сознательно сделал инверсию — оставь как у тебя.
     // Если нет — должно быть: opt.useCmdTree = ui->cbUseCmdTree->isChecked();
-    opt.useCmdTree = !ui->cbUseCmdTree->isChecked();
+    opt.useCmdTree = ui->cbUseCmdTree->isChecked();
 
 
 
