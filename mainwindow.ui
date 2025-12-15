@@ -37,7 +37,27 @@
          </property>
         </widget>
        </item>
+       <item row="4" column="0">
+        <widget class="QCheckBox" name="cbUseCmdTree">
+         <property name="toolTip">
+          <string>Если включено (Windows), дерево будет строиться командой tree /F /A через cmd</string>
+         </property>
+         <property name="text">
+          <string>Формат: tree /F /A (cmd)</string>
+         </property>
+         <property name="checked">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
        <item row="4" column="2">
+        <widget class="QCheckBox" name="cbTreeOnly">
+         <property name="text">
+          <string>Только дерево (без содержимого файлов)</string>
+         </property>
+        </widget>
+       </item>
+       <item row="6" column="2">
         <widget class="QLabel" name="label_2">
          <property name="text">
           <string>Исключить каталоги в отчете:</string>
@@ -57,21 +77,8 @@
          </property>
         </widget>
        </item>
-       <item row="5" column="0">
+       <item row="7" column="0">
         <widget class="QPlainTextEdit" name="pteIncludeExt"/>
-       </item>
-       <item row="3" column="2">
-        <widget class="QCheckBox" name="cbUseCmdTree">
-         <property name="toolTip">
-          <string>Если включено (Windows), дерево будет строиться командой tree /F /A через cmd</string>
-         </property>
-         <property name="text">
-          <string>tree /F /A (cmd)</string>
-         </property>
-         <property name="checked">
-          <bool>true</bool>
-         </property>
-        </widget>
        </item>
        <item row="0" column="0">
         <widget class="QPushButton" name="pbOpen">
@@ -111,20 +118,27 @@
          </property>
         </widget>
        </item>
-       <item row="5" column="2">
+       <item row="7" column="2">
         <widget class="QPlainTextEdit" name="pteExcludeDir"/>
        </item>
-       <item row="4" column="0">
+       <item row="6" column="0">
         <widget class="QLabel" name="label">
          <property name="text">
           <string>Список поддерживаемых расширений:</string>
          </property>
         </widget>
        </item>
-       <item row="3" column="0">
+       <item row="5" column="0">
         <widget class="QLabel" name="label_4">
          <property name="text">
-          <string>Построить дерево каталогов и файлов:</string>
+          <string>Лимит текста в отчёте (на 1 файл):</string>
+         </property>
+        </widget>
+       </item>
+       <item row="5" column="2">
+        <widget class="QLineEdit" name="leMaxOutChars">
+         <property name="text">
+          <string>1MB</string>
          </property>
         </widget>
        </item>

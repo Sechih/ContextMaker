@@ -10,10 +10,92 @@
 #include <QProcess>
 #include <QtGlobal>
 #include <algorithm>
-#include <utility>  // std::as_const
+#include <utility>
 #include <QTemporaryDir>
 #include <QXmlStreamReader>
+#include <QCoreApplication>
+#include <QHash>
+#include <QMap>
+#include <QStandardPaths>
+#include <windows.h>
+#include <limits>
 
+static void truncateWithNote(QString& s, qint64 maxChars, const QString& note)
+{
+    if (maxChars <= 0)
+        return;
+
+    const int lim = (maxChars > (qint64)std::numeric_limits<int>::max())
+                        ? std::numeric_limits<int>::max()
+                        : (int)maxChars;
+
+    if (s.size() <= lim)
+        return;
+
+    QString suffix = QStringLiteral("\n") + note + QStringLiteral("\n");
+
+    // Если даже suffix больше лимита — оставляем только кусок suffix
+    if (suffix.size() >= lim)
+    {
+        suffix.truncate(lim);
+        s = suffix;
+        return;
+    }
+
+    const int keep = lim - suffix.size();
+    s.truncate(keep);
+    s += suffix; // итог ровно <= lim
+}
+
+#ifdef Q_OS_WIN
+
+static QString decodeOem(const QByteArray& bytes)
+{
+    if (bytes.isEmpty())
+        return {};
+
+    const UINT cp = GetOEMCP(); // OEM codepage (для RU чаще 866)
+
+    const int wlen = MultiByteToWideChar(cp, 0,
+                                         bytes.constData(), bytes.size(),
+                                         nullptr, 0);
+    if (wlen <= 0)
+        return QString();
+
+    QString out(wlen, Qt::Uninitialized);
+
+    MultiByteToWideChar(cp, 0,
+                        bytes.constData(), bytes.size(),
+                        reinterpret_cast<wchar_t*>(out.data()), wlen);
+
+    return out;
+}
+#endif
+
+
+static QString makeMarkdownFence(const QString& text)
+{
+    // Найдём максимальную длину подряд идущих ` в тексте
+    int maxRun = 0;
+    int run = 0;
+
+    for (QChar ch : text)
+    {
+        if (ch == QLatin1Char('`'))
+        {
+            ++run;
+            if (run > maxRun) maxRun = run;
+        }
+        else
+        {
+            run = 0;
+        }
+    }
+
+    // Делаем fence строго длиннее любого run в контенте (минимум 3)
+    const int fenceLen = std::max(3, maxRun + 1);
+    return QString(fenceLen, QLatin1Char('`'));
+}
 
 /**
  * @brief Утилита: безопасно получить имя директории по абсолютному пути.
@@ -44,6 +126,14 @@ ReportGenerator::ReportGenerator(const Options& opt)
 
 }
 
+
+#ifdef Q_OS_WIN
+const bool onWindows = true;
+#else
+const bool onWindows = false;
+#endif
+
+
 QString ReportGenerator::generate(QString* errorOut) const
 {
     if (m_opt.rootPath.trimmed().isEmpty())
@@ -70,20 +160,8 @@ QString ReportGenerator::generate(QString* errorOut) const
     const bool rootExcluded = m_excludeSet.contains(rootName.toLower());
 
 
-#ifdef Q_OS_WIN
-    const bool onWindows = true;
-#else
-    const bool onWindows = false;
-#endif
-
     if (!rootExcluded)
     {
-#ifdef Q_OS_WIN
-        const bool onWindows = true;
-#else
-        const bool onWindows = false;
-#endif
-
         if (m_opt.useCmdTree && onWindows)
         {
             QString treeErr;
@@ -116,6 +194,11 @@ QString ReportGenerator::generate(QString* errorOut) const
 
     lines << QStringLiteral("```");
 
+    // Если включён режим "только дерево" — возвращаем отчёт прямо тут
+    if (m_opt.treeOnly)
+        return lines.join('\n');
+
+
     lines << QString(); // пустая строка
 
     lines << QStringLiteral("## 2. Содержимое файлов (отфильтровано)");
@@ -140,19 +223,28 @@ QString ReportGenerator::generate(QString* errorOut) const
             QString rel = rootDir.relativeFilePath(abs);
             rel = QDir::toNativeSeparators(rel);
 
-            lines << QStringLiteral("```text");
-            lines << QStringLiteral("----- BEGIN FILE: %1 [%2 bytes] ----").arg(rel).arg(f.size());
-
             QString readErr;
-            const QString content = readFileForReport(f, &readErr);
-            if (!readErr.isEmpty())
-                lines << QStringLiteral("[ОШИБКА ЧТЕНИЯ: %1]").arg(readErr);
-            else
-                lines << content;
+            QString content = readFileForReport(f, &readErr);
 
-            lines << QStringLiteral("----- END FILE:   %1 ----").arg(rel);
-            lines << QStringLiteral("```");
+            QString payload;
+            payload.reserve(256 + content.size());
+            payload += QStringLiteral("----- BEGIN FILE: %1 [%2 bytes] ----\n").arg(rel).arg(f.size());
+
+            if (!readErr.isEmpty())
+                payload += QStringLiteral("[ОШИБКА ЧТЕНИЯ: %1]\n").arg(readErr);
+            else
+                payload += content + QLatin1Char('\n');
+
+            payload += QStringLiteral("----- END FILE:   %1 ----\n").arg(rel);
+
+            // Выбираем безопасный fence под конкретный payload
+            const QString fence = makeMarkdownFence(payload);
+
+            lines << (fence + QStringLiteral("text"));
+            lines << payload.trimmed();
+            lines << fence;
             lines << QString();
+
         }
     }
 
@@ -462,8 +554,20 @@ QString ReportGenerator::runCmdTree(QString* errorOut) const
 
     proc.waitForFinished(-1);
 
+    // const QByteArray outBytes = proc.readAll();
+    // const QString outText = QString::fromUtf8(outBytes);
+
     const QByteArray outBytes = proc.readAll();
-    const QString outText = QString::fromUtf8(outBytes);
+
+    QString outText;
+#ifdef Q_OS_WIN
+    outText = decodeOem(outBytes);
+#else
+    outText = QString::fromUtf8(outBytes);
+#endif
+
+
+
 
     if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0)
     {
@@ -699,7 +803,6 @@ QString ReportGenerator::readFileForReport(const QFileInfo& file, QString* error
 
     if (ext == QStringLiteral(".doc"))
     {
-        // .doc — бинарный формат Word (OLE). Без Word/COM/библиотек корректно не достать текст.
         return QStringLiteral("[Файл .DOC: извлечение текста не реализовано. "
                               "Рекомендуется конвертировать в .DOCX или .TXT.]");
     }
@@ -716,6 +819,533 @@ QString ReportGenerator::readFileForReport(const QFileInfo& file, QString* error
         return text;
     }
 
+    if (ext == QStringLiteral(".pdf"))
+    {
+        QString err;
+        const QString text = readPdfText(file.absoluteFilePath(), &err);
+        if (!err.isEmpty())
+        {
+            if (errorOut) *errorOut = err;
+            return {};
+        }
+        return text;
+    }
+
+    if (ext == QStringLiteral(".xls"))
+    {
+        return QStringLiteral("[Файл .XLS: старый бинарный формат Excel. "
+                              "Извлечение текста не реализовано. "
+                              "Сохраните как .XLSX или .CSV.]");
+    }
+
+    if (ext == QStringLiteral(".xlsx") || ext == QStringLiteral(".xlsm"))
+    {
+        QString err;
+        const QString text = readXlsxText(file.absoluteFilePath(), &err);
+        if (!err.isEmpty())
+        {
+            if (errorOut) *errorOut = err;
+            return {};
+        }
+        return text;
+    }
+
     // Обычные текстовые файлы
     return readTextSmart(file.absoluteFilePath(), errorOut);
 }
+
+QString ReportGenerator::readPdfText(const QString& pdfPath, QString* errorOut) const
+{
+    const QString exe = findPdfToTextExe();
+    if (exe.isEmpty())
+    {
+        if (errorOut)
+            *errorOut = QStringLiteral(
+                "Не найден pdftotext.exe. "
+                "Положите Poppler в <папка_приложения>/tools/poppler/pdftotext.exe "
+                "или установите pdftotext в систему (PATH).");
+
+        return {};
+    }
+
+    QProcess proc;
+    proc.setProcessChannelMode(QProcess::MergedChannels);
+    proc.setProgram(exe);
+
+    // pdftotext [options] PDF-file [text-file], text-file "-" -> stdout
+    // -enc UTF-8, -layout см. manpage
+    proc.setArguments({ QStringLiteral("-enc"), QStringLiteral("UTF-8"),
+                       QStringLiteral("-layout"),
+                       pdfPath,
+                       QStringLiteral("-") });
+
+    proc.setWorkingDirectory(QFileInfo(exe).absolutePath());
+    proc.start();
+    if (!proc.waitForStarted())
+    {
+        if (errorOut)
+            *errorOut = QStringLiteral("Не удалось запустить pdftotext: %1").arg(proc.errorString());
+        return {};
+    }
+
+    proc.waitForFinished(-1);
+
+    const QByteArray outBytes = proc.readAll();
+    QString t = QString::fromUtf8(outBytes);
+
+    if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0)
+    {
+        if (errorOut)
+            *errorOut = QStringLiteral("pdftotext завершился с ошибкой (exitCode=%1). Вывод: %2")
+                            .arg(proc.exitCode())
+                            .arg(t.trimmed());
+        return {};
+    }
+
+    const qint64 maxChars = m_opt.maxOutChars; // 0 = без лимита
+    truncateWithNote(t, maxChars,
+                     QStringLiteral("[ОБРЕЗАНО: превышен лимит вывода текста]"));
+
+    return t.trimmed();
+}
+
+
+
+// ---------------- XLSX/XLSM ----------------
+
+static QString xmlAttrByQName(const QXmlStreamAttributes& attrs, const QString& qname)
+{
+    for (const auto& a : attrs)
+    {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        const QString qa = a.qualifiedName().toString();
+#else
+        const QString qa = a.qualifiedName().toString();
+#endif
+        if (qa == qname)
+            return a.value().toString();
+    }
+    return {};
+}
+
+static int excelColIndexFromCellRef(const QString& ref)
+{
+    int col = 0;
+    int i = 0;
+    while (i < ref.size() && ref[i].isLetter())
+    {
+        const QChar ch = ref[i].toUpper();
+        if (ch < QLatin1Char('A') || ch > QLatin1Char('Z'))
+            break;
+        col = col * 26 + (ch.unicode() - QLatin1Char('A').unicode() + 1);
+        ++i;
+    }
+    return (col > 0) ? (col - 1) : -1; // 0-based
+}
+
+static QVector<QString> readSharedStringsXml(const QString& ssPath, QString* errorOut)
+{
+    QVector<QString> shared;
+
+    QFile f(ssPath);
+    if (!f.open(QIODevice::ReadOnly))
+        return shared; // sharedStrings может отсутствовать — это нормально
+
+    QXmlStreamReader xml(&f);
+
+    QString cur;
+    bool inSi = false;
+
+    while (!xml.atEnd())
+    {
+        xml.readNext();
+
+        if (xml.isStartElement())
+        {
+            const auto n = xml.name();
+            if (n == QStringLiteral("si"))
+            {
+                cur.clear();
+                inSi = true;
+            }
+            else if (inSi && n == QStringLiteral("t"))
+            {
+                cur += xml.readElementText(QXmlStreamReader::IncludeChildElements);
+            }
+        }
+        else if (xml.isEndElement())
+        {
+            if (xml.name() == QStringLiteral("si"))
+            {
+                shared.push_back(cur);
+                inSi = false;
+            }
+        }
+    }
+
+    if (xml.hasError())
+    {
+        if (errorOut)
+            *errorOut = QStringLiteral("Ошибка XML sharedStrings: %1").arg(xml.errorString());
+    }
+
+    return shared;
+}
+
+static QString sheetXmlToTsv(const QString& sheetPath,
+                             const QVector<QString>& shared,
+                             qint64 maxChars,
+                             QString* errorOut)
+{
+    QFile f(sheetPath);
+    if (!f.open(QIODevice::ReadOnly))
+    {
+        if (errorOut)
+            *errorOut = QStringLiteral("Не удалось открыть лист XLSX: %1").arg(f.errorString());
+        return {};
+    }
+
+    QXmlStreamReader xml(&f);
+    QString out;
+    out.reserve(8192);
+
+    int lastRowNum = 0;
+    int currentRowNum = 0;
+
+    QMap<int, QString> rowCells;
+    int maxCol = -1;
+
+    bool inCell = false;
+    QString cellRef;
+    QString cellType;
+    QString cellValue;
+
+    auto flushRow = [&]() -> bool {
+        if (currentRowNum <= 0)
+            return true;
+
+        if (maxCol >= 0)
+        {
+            QStringList cols;
+            cols.resize(maxCol + 1);
+            for (auto it = rowCells.begin(); it != rowCells.end(); ++it)
+            {
+                const int c = it.key();
+                if (c >= 0 && c < cols.size())
+                    cols[c] = it.value();
+            }
+
+            // Пишем: номер строки + табличные значения
+            out += QString::number(currentRowNum);
+            out += QLatin1Char('\t');
+            out += cols.join(QStringLiteral("\t"));
+        }
+        else
+        {
+            out += QString::number(currentRowNum);
+        }
+
+        out += QLatin1Char('\n');
+
+        if (maxChars > 0 && out.size() > maxChars)
+        {
+            truncateWithNote(out, maxChars, QStringLiteral("[ОБРЕЗАНО: слишком много данных]"));
+            return false;
+        }
+
+        return true;
+    };
+
+    while (!xml.atEnd())
+    {
+        xml.readNext();
+
+        if (xml.isStartElement())
+        {
+            const auto n = xml.name();
+
+            if (n == QStringLiteral("row"))
+            {
+                bool ok = false;
+                currentRowNum = xml.attributes().value(QStringLiteral("r")).toInt(&ok);
+                if (!ok || currentRowNum <= 0)
+                    currentRowNum = lastRowNum + 1;
+                lastRowNum = currentRowNum;
+
+                rowCells.clear();
+                maxCol = -1;
+            }
+            else if (n == QStringLiteral("c"))
+            {
+                inCell = true;
+                cellRef = xml.attributes().value(QStringLiteral("r")).toString();
+                cellType = xml.attributes().value(QStringLiteral("t")).toString();
+                cellValue.clear();
+            }
+            else if (inCell && n == QStringLiteral("v"))
+            {
+                cellValue = xml.readElementText(QXmlStreamReader::IncludeChildElements);
+            }
+            else if (inCell && cellType == QStringLiteral("inlineStr") && n == QStringLiteral("t"))
+            {
+                cellValue += xml.readElementText(QXmlStreamReader::IncludeChildElements);
+            }
+        }
+        else if (xml.isEndElement())
+        {
+            const auto n = xml.name();
+
+            if (n == QStringLiteral("c") && inCell)
+            {
+                const int col = excelColIndexFromCellRef(cellRef);
+
+                QString val;
+                if (cellType == QStringLiteral("s"))
+                {
+                    bool ok = false;
+                    const int idx = cellValue.toInt(&ok);
+                    if (ok && idx >= 0 && idx < shared.size())
+                        val = shared[idx];
+                    else
+                        val = QStringLiteral("[bad sharedString index: %1]").arg(cellValue);
+                }
+                else if (cellType == QStringLiteral("b"))
+                {
+                    val = (cellValue == QStringLiteral("1")) ? QStringLiteral("TRUE") : QStringLiteral("FALSE");
+                }
+                else
+                {
+                    val = cellValue;
+                }
+
+                if (col >= 0)
+                {
+                    rowCells[col] = val;
+                    maxCol = std::max(maxCol, col);
+                }
+
+                inCell = false;
+            }
+            else if (n == QStringLiteral("row"))
+            {
+                if (!flushRow())
+                    break;
+                currentRowNum = 0;
+            }
+        }
+    }
+
+    if (xml.hasError())
+    {
+        if (errorOut)
+            *errorOut = QStringLiteral("Ошибка XML листа XLSX: %1").arg(xml.errorString());
+        return {};
+    }
+
+    return out.trimmed();
+}
+
+QString ReportGenerator::readXlsxText(const QString& xlsxPath, QString* errorOut) const
+{
+#ifdef Q_OS_WIN
+    QTemporaryDir tmp;
+    if (!tmp.isValid())
+    {
+        if (errorOut) *errorOut = QStringLiteral("Не удалось создать временную папку для распаковки XLSX.");
+        return {};
+    }
+
+    // XLSX/XLSM = ZIP, но Expand-Archive любит .zip
+    const QString zipPath = QDir(tmp.path()).filePath(QStringLiteral("xlsx.zip"));
+    QFile::remove(zipPath);
+    if (!QFile::copy(xlsxPath, zipPath))
+    {
+        if (errorOut) *errorOut = QStringLiteral("Не удалось скопировать XLSX во временный ZIP для распаковки.");
+        return {};
+    }
+
+    const QString srcZip = psEscapeSingleQuoted(QDir::toNativeSeparators(zipPath));
+    const QString dst    = psEscapeSingleQuoted(QDir::toNativeSeparators(tmp.path()));
+
+    const QString cmd = QStringLiteral(
+                            "$ErrorActionPreference='Stop';"
+                            "$OutputEncoding=[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+                            "Expand-Archive -LiteralPath '%1' -DestinationPath '%2' -Force"
+                            ).arg(srcZip, dst);
+
+    QProcess proc;
+    proc.setProcessChannelMode(QProcess::MergedChannels);
+    proc.start(QStringLiteral("powershell.exe"),
+               QStringList()
+                   << QStringLiteral("-NoProfile")
+                   << QStringLiteral("-NonInteractive")
+                   << QStringLiteral("-ExecutionPolicy") << QStringLiteral("Bypass")
+                   << QStringLiteral("-Command") << cmd);
+
+    proc.waitForFinished(-1);
+
+    if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0)
+    {
+        const QString out = QString::fromUtf8(proc.readAll()).trimmed();
+        if (errorOut)
+            *errorOut = QStringLiteral("Ошибка извлечения XLSX (Expand-Archive): %1").arg(out);
+        return {};
+    }
+
+    const QString xlDir = QDir(tmp.path()).filePath(QStringLiteral("xl"));
+    const QString ssPath = QDir(xlDir).filePath(QStringLiteral("sharedStrings.xml"));
+
+    QString ssErr;
+    const QVector<QString> shared = readSharedStringsXml(ssPath, &ssErr);
+    // ssErr не считаем фатальным — sharedStrings может отсутствовать
+
+    // workbook rels: xl/_rels/workbook.xml.rels
+    QHash<QString, QString> rel;
+    {
+        const QString relsPath = QDir(xlDir).filePath(QStringLiteral("_rels/workbook.xml.rels"));
+        QFile f(relsPath);
+        if (f.open(QIODevice::ReadOnly))
+        {
+            QXmlStreamReader xml(&f);
+            while (!xml.atEnd())
+            {
+                xml.readNext();
+                if (xml.isStartElement() && xml.name() == QStringLiteral("Relationship"))
+                {
+                    const QString id = xml.attributes().value(QStringLiteral("Id")).toString();
+                    const QString target = xml.attributes().value(QStringLiteral("Target")).toString();
+                    if (!id.isEmpty() && !target.isEmpty())
+                        rel.insert(id, target);
+                }
+            }
+        }
+    }
+
+    struct Sheet { QString name; QString path; };
+    QVector<Sheet> sheets;
+
+    // workbook: xl/workbook.xml
+    {
+        const QString wbPath = QDir(xlDir).filePath(QStringLiteral("workbook.xml"));
+        QFile f(wbPath);
+        if (f.open(QIODevice::ReadOnly))
+        {
+            QXmlStreamReader xml(&f);
+            while (!xml.atEnd())
+            {
+                xml.readNext();
+                if (xml.isStartElement() && xml.name() == QStringLiteral("sheet"))
+                {
+                    const QString name = xml.attributes().value(QStringLiteral("name")).toString();
+                    const QString rid = xmlAttrByQName(xml.attributes(), QStringLiteral("r:id"));
+                    const QString target = rel.value(rid);
+
+                    // target обычно "worksheets/sheet1.xml"
+                    QString sheetPath;
+                    if (!target.isEmpty())
+                        sheetPath = QDir(xlDir).filePath(target);
+
+                    if (!sheetPath.isEmpty() && QFileInfo::exists(sheetPath))
+                    {
+                        sheets.push_back({ name.isEmpty() ? QFileInfo(sheetPath).baseName() : name, sheetPath });
+                    }
+                }
+            }
+        }
+    }
+
+    // fallback: если workbook не распарсили — берём все xl/worksheets/*.xml
+    if (sheets.isEmpty())
+    {
+        QDir wsDir(QDir(xlDir).filePath(QStringLiteral("worksheets")));
+        const QStringList files = wsDir.entryList(QStringList() << QStringLiteral("*.xml"),
+                                                  QDir::Files, QDir::Name);
+        for (const QString& fn : files)
+            sheets.push_back({ fn, wsDir.filePath(fn) });
+    }
+
+    if (sheets.isEmpty())
+    {
+        if (errorOut) *errorOut = QStringLiteral("В XLSX не найдены листы (worksheets).");
+        return {};
+    }
+
+    // Ограничение на объём текста (в символах) — чтобы не взорваться на “маленьком, но супер-упакованном” xlsx.
+   // const qint64 maxChars = (m_opt.maxBytes > 0) ? m_opt.maxBytes : (1024 * 1024);
+    const qint64 maxChars = m_opt.maxOutChars; // 0 = без лимита
+
+    QString out;
+    out.reserve(8192);
+
+    out += QStringLiteral("[XLSX] %1\n").arg(QFileInfo(xlsxPath).fileName());
+    if (!ssErr.isEmpty())
+        out += QStringLiteral("[предупреждение sharedStrings] %1\n").arg(ssErr);
+
+    for (const Sheet& sh : sheets)
+    {
+        out += QStringLiteral("\n----- SHEET: %1 -----\n").arg(sh.name);
+
+        QString sheetErr;
+        const QString tsv = sheetXmlToTsv(sh.path, shared, maxChars, &sheetErr);
+
+        if (!sheetErr.isEmpty())
+        {
+            out += QStringLiteral("[ОШИБКА ЛИСТА: %1]\n").arg(sheetErr);
+            continue;
+        }
+
+        out += tsv;
+        out += QLatin1Char('\n');
+
+        if (maxChars > 0 && out.size() > maxChars)
+        {
+            truncateWithNote(out, maxChars,
+                             QStringLiteral("[ОБЩЕЕ ОБРЕЗАНО: слишком много данных]"));
+            break;
+        }
+
+    }
+
+    return out.trimmed();
+
+#else
+    if (errorOut)
+        *errorOut = QStringLiteral("Извлечение текста из XLSX сейчас реализовано только для Windows.");
+    return {};
+#endif
+}
+
+
+QString ReportGenerator::findPdfToTextExe() const
+{
+#ifdef Q_OS_WIN
+    const QDir appDir(QCoreApplication::applicationDirPath());
+
+    // 1) Вариант "положили прямо рядом с ContextMaker.exe" (не лучший, но пусть будет)
+    const QString flat = appDir.filePath(QStringLiteral("pdftotext.exe"));
+    if (QFileInfo::exists(flat))
+        return flat;
+
+    // 2) РЕКОМЕНДУЕМЫЙ вариант для деплоя:
+    // <рядом с exe>/tools/poppler/pdftotext.exe
+    const QString toolsPoppler = appDir.filePath(QStringLiteral("tools/poppler/pdftotext.exe"));
+    if (QFileInfo::exists(toolsPoppler))
+        return toolsPoppler;
+
+    // 3) Альтернатива: <рядом с exe>/poppler/pdftotext.exe
+    const QString poppler = appDir.filePath(QStringLiteral("poppler/pdftotext.exe"));
+    if (QFileInfo::exists(poppler))
+        return poppler;
+#endif
+
+    // 4) Если пользователь установил pdftotext в систему и добавил в PATH
+    const QString inPath = QStandardPaths::findExecutable(QStringLiteral("pdftotext"));
+    if (!inPath.isEmpty())
+        return inPath;
+
+    return {};
+}
+
+
+
+

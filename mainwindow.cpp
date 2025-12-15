@@ -18,6 +18,7 @@
 
 
 
+
 /**
  * @brief Парсит строку размера (например: "1MB", "512KB", "2.5MiB") в байты.
  * @details
@@ -150,12 +151,19 @@ static QStringList parseUserList(const QString& text, bool forceDotPrefix, bool 
 static QStringList defaultIncludeExt()
 {
     return {
-        ".doc",".docx",".ps1",".psm1",".psd1",".bat",".cmd",
+        // Документы
+        ".doc",".docx",".pdf",
+        // Excel
+        ".xls",".xlsx",".xlsm",
+
+        // Скрипты/текст
+        ".ps1",".psm1",".psd1",".bat",".cmd",
         ".txt",".md",".json",".xml",".yaml",".yml",".csv",".ini",".config",
         ".cs",".vb",".fs",".cpp",".hpp",".c",".h",
         ".py",".rb",".go",".ts",".tsx",".js",".jsx",".html",".css"
     };
 }
+
 
 /**
  * @brief Список папок-исключений, как в исходном PowerShell-скрипте.
@@ -187,6 +195,17 @@ MainWindow::MainWindow(QWidget *parent)
         "code, pre { font-family: Consolas, 'Courier New', monospace; }"
         "pre { background-color: rgba(127,127,127,0.15); padding: 6px; }"
         );
+
+
+
+    ///@{
+    ui->leMaxOutChars->setValidator(new QRegularExpressionValidator(
+        QRegularExpression(QStringLiteral(R"(^\s*\d+([.,]\d+)?\s*(B|KB|MB|GB|TB|K|M|G|T|KiB|MiB|GiB|TiB)?\s*$)"),
+                           QRegularExpression::CaseInsensitiveOption),
+        ui->leMaxOutChars));
+
+    ui->leMaxOutChars->setText(QStringLiteral("1MB"));
+    ///@}
 
 
 
@@ -257,6 +276,21 @@ void MainWindow::onOpenClicked()
     refreshUiState();
 }
 
+
+static bool parseHumanSizeToBytesAllowZero(QString text, qint64* out, QString* err=nullptr)
+{
+    const QString t = text.trimmed();
+    if (t == "0" || t.compare("0B", Qt::CaseInsensitive) == 0)
+    {
+        if (out) *out = 0;
+        return true;
+    }
+    return parseHumanSizeToBytes(text, out, err);
+}
+
+
+
+
 void MainWindow::onBuildClicked()
 {
     if (m_rootDir.isEmpty())
@@ -274,7 +308,24 @@ void MainWindow::onBuildClicked()
     // opt.maxBytes = 1024 * 1024;
     // Параметры генерации из UI
     ReportGenerator::Options opt;
+
+    qint64 maxOutChars = 0;
+    QString outErr;
+    if (!parseHumanSizeToBytesAllowZero(ui->leMaxOutChars->text(), &maxOutChars, &outErr))
+    {
+        QMessageBox::warning(this,
+                             QStringLiteral("Неверный лимит вывода"),
+                             QStringLiteral("Не удалось разобрать лимит вывода: %1\nПример: 200KB, 1MB, 5MB")
+                                 .arg(outErr));
+        return;
+    }
+    opt.maxOutChars = maxOutChars;
+
+
+
     opt.rootPath = m_rootDir;
+    opt.treeOnly = ui->cbTreeOnly->isChecked();
+
 
     opt.noBomEncodingMode =
         (ui->cbEncodingMode->currentIndex() == 1)

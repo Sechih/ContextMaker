@@ -27,7 +27,10 @@ public:
         QStringList includeExt;
         QStringList excludeDirNames;
         qint64 maxBytes = 1024 * 1024;
+        qint64 maxOutChars = 1024 * 1024;   // лимит текста, вставляемого в отчёт (символы). 0 = без лимита
         bool useCmdTree = false;
+        bool treeOnly = false; // Если true — генерируем только дерево, без секции 2
+
 
         /**
      * @brief Поведение для файлов БЕЗ BOM.
@@ -120,5 +123,20 @@ private:
      *          и чтение word/document.xml.
      */
     QString readDocxText(const QString& docxPath, QString* errorOut = nullptr) const;
+
+    /**
+     * @brief Извлекает текст из PDF через внешнюю утилиту pdftotext (Poppler).
+     * @note  Нужен pdftotext.exe рядом с приложением или в PATH.
+     */
+    QString readPdfText(const QString& pdfPath, QString* errorOut = nullptr) const;
+
+    /**
+     * @brief Извлекает текст из XLSX/XLSM (OpenXML) через распаковку и парсинг XML.
+     * @note  Реализация через PowerShell Expand-Archive (Windows).
+     */
+    QString readXlsxText(const QString& xlsxPath, QString* errorOut = nullptr) const;
+
+
+    QString findPdfToTextExe() const;
 
 };

@@ -35,13 +35,6 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
     )
 
 
-#/** \brief Вшиваем иконку в EXE на Windows (через .rc). */
-if(WIN32)
-    target_sources(ContextMaker PRIVATE appicon.rc)
-endif()
-
-
-
 # Define target properties for Android with Qt 6 as:
 #    set_property(TARGET ContextMaker APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
 #                 ${CMAKE_CURRENT_SOURCE_DIR}/android)
@@ -90,3 +83,59 @@ install(TARGETS ContextMaker
 if(QT_VERSION_MAJOR EQUAL 6)
     qt_finalize_executable(ContextMaker)
 endif()
+
+
+# ===================================================================
+#  УНИВЕРСАЛЬНЫЙ БЛОК: install + deploy для Qt‑приложения
+#
+#  Предполагается:
+#    - цель приложения называется ${PROJECT_NAME}
+#    - Qt 6 (для Qt 5 блок с qt_generate_deploy_app_script просто не сработает)
+#    - qt_finalize_executable(${PROJECT_NAME}) больше НИГДЕ в CMakeLists.txt нет
+# ===================================================================
+
+include(GNUInstallDirs)
+
+#/** \brief Куда ставим exe и библиотеки при `cmake --install`. */
+install(TARGETS ${PROJECT_NAME}
+    BUNDLE  DESTINATION .
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
+#/** \brief Qt 6: генерация скрипта деплоя (windeployqt/macdeployqt и т.п.). */
+if (QT_VERSION_MAJOR EQUAL 6)
+    qt_generate_deploy_app_script(
+        TARGET ${PROJECT_NAME}
+        OUTPUT_SCRIPT qt_deploy_script
+        NO_UNSUPPORTED_PLATFORM_ERROR
+    )
+    #/** \brief Подключаем скрипт деплоя в install. */
+    install(SCRIPT ${qt_deploy_script})
+
+    #/** \brief ВАЖНО: финализируем исполняемый файл ТОЛЬКО здесь. */
+    qt_finalize_executable(${PROJECT_NAME})
+endif()
+
+# ===================================================================
+#/** \brief Удобная цель deploy для Windows. */
+#/** \details Вызывает `cmake --install` с нужным префиксом. */
+# ===================================================================
+if (WIN32 AND QT_VERSION_MAJOR EQUAL 6)
+    #/** \brief Куда складывать готовый деплой (по умолчанию: <корень_проекта>/deploy,
+    # *         т.е. рядом с каталогом build при out-of-source сборке). */
+    set(APP_DEPLOY_PREFIX "${CMAKE_SOURCE_DIR}/deploy"
+        CACHE PATH "Install / deploy prefix")
+
+    #/** \brief Цель deploy, которую будем вызывать из Qt Creator / консоли. */
+    add_custom_target(deploy
+        COMMAND "${CMAKE_COMMAND}" --install "${CMAKE_BINARY_DIR}"
+                --config $<CONFIG>
+                --prefix "${APP_DEPLOY_PREFIX}"
+        COMMENT "Deploying ${PROJECT_NAME} to ${APP_DEPLOY_PREFIX}"
+    )
+
+    #/** \brief Перед деплоем обязательно собираем само приложение. */
+    add_dependencies(deploy ${PROJECT_NAME})
+endif()
+
