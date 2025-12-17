@@ -7,6 +7,8 @@
 #include <QSettings>
 #include <QPalette>
 #include <QStyle>
+// #include <QCoreApplication>
+// #include <QDir>
 
 
 
@@ -106,15 +108,39 @@ int main(int argc, char *argv[])
     a.setWindowIcon(QIcon(":/icons/icons/documents_papers_sheets_icon_187064.ico"));
 
 
-    QTranslator translator;
-    const QStringList uiLanguages = QLocale::system().uiLanguages();
-    for (const QString &locale : uiLanguages) {
-        const QString baseName = "ContextMaker_" + QLocale(locale).name();
-        if (translator.load(":/i18n/" + baseName)) {
-            a.installTranslator(&translator);
-            break;
-        }
-    }
+    // QTranslator translator;
+    // const QStringList uiLanguages = QLocale::system().uiLanguages();
+    // for (const QString &locale : uiLanguages) {
+    //     const QString baseName = "ContextMaker_" + QLocale(locale).name();
+    //     if (translator.load(":/i18n/" + baseName)) {
+    //         a.installTranslator(&translator);
+    //         break;
+    //     }
+    // }
+ //   QTranslator translator;
+
+ //    /** \brief Папка, где лежат переводы приложения (.qm).
+ // *  \details Мы будем класть их рядом с exe в подпапку i18n.
+ // */
+ //    const QString i18nDir = QDir(QCoreApplication::applicationDirPath()).filePath("i18n");
+
+ //    const QStringList uiLanguages = QLocale::system().uiLanguages();
+ //    for (const QString &locale : uiLanguages)
+ //    {
+ //        const QString baseName = QStringLiteral("ContextMaker_") + QLocale(locale).name(); // например ContextMaker_ru_RU
+
+ //        /** \brief Ищем файл <i18nDir>/<baseName>.qm */
+ //        if (translator.load(baseName, i18nDir))
+ //        {
+ //            a.installTranslator(&translator);
+ //            break;
+ //        }
+ //    }
+
+
+
+
+
     MainWindow w;
     w.show();
     return a.exec();

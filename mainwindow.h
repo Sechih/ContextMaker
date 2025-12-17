@@ -2,6 +2,13 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QFutureWatcher>
+#include <QPair>
+#include <QPointer>
+#include <atomic>
+
+class QProgressDialog;
+
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -22,6 +29,7 @@ private slots:
     void onBuildClicked();
     void onSaveClicked();
     void onReportContextMenuRequested(const QPoint& pos);
+    void onBuildFinished();
 
 
 private:
@@ -30,6 +38,15 @@ private:
     QString m_rootDir;          ///< Выбранный каталог для обхода.
     QString m_lastSavePath;     ///< Последний путь сохранения (для удобства).
     QString m_reportMarkdown; ///< Исходный markdown отчёта (для сохранения в файл).
+    bool m_buildInProgress = false; ///< Идёт ли сейчас генерация отчёта.
+
+    std::atomic_bool m_cancelRequested { false }; ///< Флаг отмены для генератора.
+
+    /** \brief Результат фоновой генерации: (report, error). */
+    QFutureWatcher<QPair<QString, QString>> m_buildWatcher;
+
+    /** \brief Диалог прогресса (спиннер) на время генерации. */
+    QPointer<QProgressDialog> m_progress;
 
     /**
      * @brief Включить/выключить кнопки в зависимости от состояния.

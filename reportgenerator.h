@@ -10,6 +10,8 @@
 #include <QSet>
 #include <QFileInfo>
 #include <QVector>
+#include <atomic>
+
 
 /**
  * @brief Класс, который повторяет логику PowerShell-скрипта Export-TreeWithContents.ps1,
@@ -30,6 +32,12 @@ public:
         qint64 maxOutChars = 1024 * 1024;   // лимит текста, вставляемого в отчёт (символы). 0 = без лимита
         bool useCmdTree = false;
         bool treeOnly = false; // Если true — генерируем только дерево, без секции 2
+        /** \brief Флаг отмены генерации.
+         *  \details Если не nullptr — генератор периодически проверяет флаг.
+         *           При true старается завершиться как можно быстрее.
+         *  \note Указатель должен жить дольше, чем работает генерация.
+         */
+        std::atomic_bool* cancelRequested = nullptr;
 
 
         /**
@@ -138,5 +146,8 @@ private:
 
 
     QString findPdfToTextExe() const;
+
+    /** \brief Проверка: пользователь запросил отмену. */
+    bool isCanceled() const;
 
 };

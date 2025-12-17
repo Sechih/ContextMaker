@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- /** \brief Общая конфигурация инсталлятора */ -->
+<Installer>
+  <Name>ContextMaker</Name>
+  <Version>1.0.0</Version>
+  <Title>ContextMaker Installer</Title>
+  <Publisher>Ваша компания</Publisher>
+  <ProductUrl>https://example.local</ProductUrl>
+  <TargetDir>@ApplicationsDir@/ContextMaker</TargetDir>
+  <StartMenuDir>ContextMaker</StartMenuDir>
+  <WizardStyle>Modern</WizardStyle>
+  <AllowNonAsciiCharacters>true</AllowNonAsciiCharacters>
+  <InstallerApplicationIcon>app.ico</InstallerApplicationIcon>   <!-- по желанию -->
+  <InstallerWindowIcon>app.ico</InstallerWindowIcon>             <!-- по желанию -->
+</Installer>

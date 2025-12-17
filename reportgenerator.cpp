@@ -26,6 +26,7 @@
 #include <windows.h>
 #endif
 
+
 static void truncateWithNote(QString& s, qint64 maxChars, const QString& note)
 {
     if (maxChars <= 0)
@@ -52,6 +53,26 @@ static void truncateWithNote(QString& s, qint64 maxChars, const QString& note)
     s.truncate(keep);
     s += suffix; // итог ровно <= lim
 }
+
+// Обрезает строку "жёстко", без заметки.
+// Важно: режем до (лимит + 1), чтобы финальный truncateWithNote() в readFileForReport()
+// точно сработал и добавил единую заметку об обрезке.
+static void truncateHardForFinalNote(QString& s, qint64 maxChars)
+{
+    if (maxChars <= 0)
+        return;
+
+    const int lim = (maxChars > (qint64)std::numeric_limits<int>::max())
+                        ? std::numeric_limits<int>::max()
+                        : (int)maxChars;
+
+    const int hard = (lim == std::numeric_limits<int>::max()) ? lim : (lim + 1);
+
+    if (s.size() > hard)
+        s.truncate(hard);
+}
+
+
 
 #ifdef Q_OS_WIN
 
@@ -156,6 +177,14 @@ QString ReportGenerator::generate(QString* errorOut) const
         return {};
     }
 
+
+    if (isCanceled())
+    {
+        if (errorOut) *errorOut = QStringLiteral("Отменено пользователем.");
+        return {};
+    }
+
+
     QStringList lines;
     lines << QStringLiteral("# Отчёт по каталогу: %1").arg(root);
     lines << QStringLiteral("## 1. Дерево каталогов и файлов");
@@ -225,6 +254,13 @@ QString ReportGenerator::generate(QString* errorOut) const
 
         for (const QFileInfo& f : std::as_const(files))
         {
+
+            if (isCanceled())
+            {
+                if (errorOut) *errorOut = QStringLiteral("Отменено пользователем.");
+                break; // выходим аккуратно, Markdown останется валидным
+            }
+
             const QString abs = f.absoluteFilePath();
             QString rel = rootDir.relativeFilePath(abs);
             rel = QDir::toNativeSeparators(rel);
@@ -257,7 +293,7 @@ QString ReportGenerator::generate(QString* errorOut) const
     return lines.join('\n');
 }
 
-bool ReportGenerator::isUnderExcluded(const QFileInfo& item) const
+/*bool ReportGenerator::isUnderExcluded(const QFileInfo& item) const
 {
     // Берём директорию: для файла — его папка, для папки — она сама.
     QDir dir = item.isDir() ? QDir(item.absoluteFilePath()) : item.dir();
@@ -276,7 +312,36 @@ bool ReportGenerator::isUnderExcluded(const QFileInfo& item) const
             break;
     }
     return false;
+}*/
+bool ReportGenerator::isUnderExcluded(const QFileInfo& item) const
+{
+    const QString rootAbs = QDir::cleanPath(QFileInfo(m_opt.rootPath).absoluteFilePath());
+
+    QDir dir = item.isDir() ? QDir(item.absoluteFilePath()) : item.dir();
+
+    while (true)
+    {
+        const QString curAbs = QDir::cleanPath(dir.absolutePath());
+        const QString name = dirNameFromPath(curAbs).toLower();
+
+        if (!name.isEmpty() && m_excludeSet.contains(name))
+            return true;
+
+        ///** \brief Не поднимаемся выше выбранного root. */
+        if (curAbs.compare(rootAbs, Qt::CaseInsensitive) == 0)
+            break;
+
+        const QString before = curAbs;
+        if (!dir.cdUp())
+            break;
+
+        if (QDir::cleanPath(dir.absolutePath()) == before)
+            break;
+    }
+
+    return false;
 }
+
 
 bool ReportGenerator::shouldIncludeFile(const QFileInfo& file) const
 {
@@ -490,6 +555,10 @@ QString ReportGenerator::readTextSmart(const QString& path, QString* errorOut) c
 
 void ReportGenerator::showTreeRec(const QString& path, const QString& indent, QStringList& outLines) const
 {
+
+    if (isCanceled())
+        return;
+
     QDir dir(path);
 
     QFileInfoList items = dir.entryInfoList(
@@ -517,6 +586,9 @@ void ReportGenerator::showTreeRec(const QString& path, const QString& indent, QS
 
     for (int i = 0; i < filtered.size(); ++i)
     {
+        if (isCanceled())
+            return;
+
         const QFileInfo item = filtered.at(i);
         const bool isLast = (i == filtered.size() - 1);
 
@@ -603,6 +675,9 @@ QString ReportGenerator::runCmdTree(QString* errorOut) const
 
 void ReportGenerator::collectFilesRec(const QString& dirPath, QVector<QFileInfo>& outFiles) const
 {
+    if (isCanceled())
+        return;
+
     QDir dir(dirPath);
 
     QFileInfoList entries = dir.entryInfoList(
@@ -613,6 +688,8 @@ void ReportGenerator::collectFilesRec(const QString& dirPath, QVector<QFileInfo>
     // Сортировка не нужна на этом этапе — отсортируем общий список в generate().
     for (const QFileInfo& it : std::as_const(entries))
     {
+        if (isCanceled())
+            return;
         // Пропуск: всё, что находится под исключаемыми папками.
         if (isUnderExcluded(it))
             continue;
@@ -904,6 +981,16 @@ QString ReportGenerator::readPdfText(const QString& pdfPath, QString* errorOut) 
     const QByteArray outBytes = proc.readAll();
     QString t = QString::fromUtf8(outBytes);
 
+    /** \brief Убираем разрыв страницы (Form Feed, \f) из pdftotext.
+ *  \details pdftotext часто вставляет 0x0C между страницами.
+ *           В QTextEdit это выглядит как "квадратик" или "".
+ */
+    t.replace(QChar(0x000C), QLatin1Char('\n'));
+
+    /** \brief (Опционально) нормализуем переводы строк под единый вид. */
+    t.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+
+
     if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0)
     {
         if (errorOut)
@@ -912,10 +999,6 @@ QString ReportGenerator::readPdfText(const QString& pdfPath, QString* errorOut) 
                             .arg(t.trimmed());
         return {};
     }
-
-    const qint64 maxChars = m_opt.maxOutChars; // 0 = без лимита
-    truncateWithNote(t, maxChars,
-                     QStringLiteral("[ОБРЕЗАНО: превышен лимит вывода текста]"));
 
     return t.trimmed();
 }
@@ -1060,9 +1143,10 @@ static QString sheetXmlToTsv(const QString& sheetPath,
 
         if (maxChars > 0 && out.size() > maxChars)
         {
-            truncateWithNote(out, maxChars, QStringLiteral("[ОБРЕЗАНО: слишком много данных]"));
+            truncateHardForFinalNote(out, maxChars);
             return false;
         }
+
 
         return true;
     };
@@ -1153,7 +1237,7 @@ static QString sheetXmlToTsv(const QString& sheetPath,
         return {};
     }
 
-    return out.trimmed();
+    return out/*.trimmed()*/;
 }
 
 QString ReportGenerator::readXlsxText(const QString& xlsxPath, QString* errorOut) const
@@ -1310,14 +1394,13 @@ QString ReportGenerator::readXlsxText(const QString& xlsxPath, QString* errorOut
 
         if (maxChars > 0 && out.size() > maxChars)
         {
-            truncateWithNote(out, maxChars,
-                             QStringLiteral("[ОБЩЕЕ ОБРЕЗАНО: слишком много данных]"));
+            truncateHardForFinalNote(out, maxChars);
             break;
         }
 
     }
 
-    return out.trimmed();
+    return out/*.trimmed()*/;
 
 #else
     if (errorOut)
@@ -1358,5 +1441,10 @@ QString ReportGenerator::findPdfToTextExe() const
 }
 
 
+bool ReportGenerator::isCanceled() const
+{
+    return (m_opt.cancelRequested &&
+            m_opt.cancelRequested->load(std::memory_order_relaxed));
+}
 
 

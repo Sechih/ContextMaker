@@ -30,10 +30,34 @@
        <string/>
       </property>
       <layout class="QGridLayout" name="gridLayout_2">
-       <item row="0" column="2">
-        <widget class="QPushButton" name="pbBuild">
+       <item row="7" column="2">
+        <widget class="QLabel" name="label_2">
          <property name="text">
-          <string>Собрать отчет</string>
+          <string>Исключить каталоги в отчете:</string>
+         </property>
+        </widget>
+       </item>
+       <item row="4" column="2">
+        <widget class="QLabel" name="label_4">
+         <property name="text">
+          <string>Лимит текста в отчёте (на 1 файл):</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="0">
+        <widget class="QPushButton" name="pbOpen">
+         <property name="text">
+          <string>Открыть</string>
+         </property>
+        </widget>
+       </item>
+       <item row="8" column="0">
+        <widget class="QPlainTextEdit" name="pteIncludeExt"/>
+       </item>
+       <item row="7" column="0">
+        <widget class="QLabel" name="label">
+         <property name="text">
+          <string>Список поддерживаемых расширений:</string>
          </property>
         </widget>
        </item>
@@ -43,31 +67,41 @@
           <string>Если включено (Windows), дерево будет строиться командой tree /F /A через cmd</string>
          </property>
          <property name="text">
-          <string>Формат: tree /F /A (cmd)</string>
+          <string>Формат дерева вывода: tree /F /A (cmd)</string>
          </property>
          <property name="checked">
           <bool>false</bool>
          </property>
         </widget>
        </item>
-       <item row="4" column="2">
-        <widget class="QCheckBox" name="cbTreeOnly">
+       <item row="1" column="0">
+        <widget class="QPushButton" name="pbSave">
          <property name="text">
-          <string>Только дерево (без содержимого файлов)</string>
+          <string>Сохранить</string>
          </property>
         </widget>
        </item>
-       <item row="6" column="2">
-        <widget class="QLabel" name="label_2">
+       <item row="5" column="2">
+        <widget class="QLineEdit" name="leMaxOutChars">
+         <property name="toolTip">
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;“Пример: 512KB, 1MB, 2.5MB, 1GiB (B|KB|MB|GB|TB|K|M|G|T|KiB|MiB|GiB|TiB)”&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+         </property>
          <property name="text">
-          <string>Исключить каталоги в отчете:</string>
+          <string>1MB</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="2">
+        <widget class="QPushButton" name="pbBuild">
+         <property name="text">
+          <string>Собрать отчет</string>
          </property>
         </widget>
        </item>
        <item row="2" column="2">
         <widget class="QLineEdit" name="leMaxBytes">
          <property name="toolTip">
-          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;“Пример: 512KB, 1MB, 2.5MB, 1GiB”&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;“Пример: 512KB, 1MB, 2.5MB, 1GiB (B|KB|MB|GB|TB|K|M|G|T|KiB|MiB|GiB|TiB)”&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
          </property>
          <property name="text">
           <string>1MB</string>
@@ -77,20 +111,13 @@
          </property>
         </widget>
        </item>
-       <item row="7" column="0">
-        <widget class="QPlainTextEdit" name="pteIncludeExt"/>
+       <item row="8" column="2">
+        <widget class="QPlainTextEdit" name="pteExcludeDir"/>
        </item>
-       <item row="0" column="0">
-        <widget class="QPushButton" name="pbOpen">
+       <item row="1" column="2">
+        <widget class="QLabel" name="label_3">
          <property name="text">
-          <string>Открыть</string>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="0">
-        <widget class="QPushButton" name="pbSave">
-         <property name="text">
-          <string>Сохранить</string>
+          <string>Ограничение размера файла при сборке:</string>
          </property>
         </widget>
        </item>
@@ -111,34 +138,24 @@
          </item>
         </widget>
        </item>
-       <item row="1" column="2">
-        <widget class="QLabel" name="label_3">
-         <property name="text">
-          <string>Ограничение размера файла при сборке:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="7" column="2">
-        <widget class="QPlainTextEdit" name="pteExcludeDir"/>
-       </item>
-       <item row="6" column="0">
-        <widget class="QLabel" name="label">
-         <property name="text">
-          <string>Список поддерживаемых расширений:</string>
-         </property>
-        </widget>
-       </item>
        <item row="5" column="0">
-        <widget class="QLabel" name="label_4">
+        <widget class="QCheckBox" name="cbTreeOnly">
          <property name="text">
-          <string>Лимит текста в отчёте (на 1 файл):</string>
+          <string>Только дерево (без содержимого файлов)</string>
          </property>
         </widget>
        </item>
-       <item row="5" column="2">
-        <widget class="QLineEdit" name="leMaxOutChars">
-         <property name="text">
-          <string>1MB</string>
+       <item row="6" column="0" colspan="2">
+        <widget class="Line" name="line">
+         <property name="orientation">
+          <enum>Qt::Orientation::Horizontal</enum>
+         </property>
+        </widget>
+       </item>
+       <item row="6" column="2">
+        <widget class="Line" name="line_2">
+         <property name="orientation">
+          <enum>Qt::Orientation::Horizontal</enum>
          </property>
         </widget>
        </item>

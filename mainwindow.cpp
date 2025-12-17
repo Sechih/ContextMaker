@@ -14,6 +14,8 @@
 #include <limits>
 #include <QClipboard>
 #include <QGuiApplication>
+#include <QtConcurrent/QtConcurrentRun>
+#include <QProgressDialog>
 
 
 
@@ -161,7 +163,8 @@ static QStringList defaultIncludeExt()
         ".ps1",".psm1",".psd1",".bat",".cmd",
         ".txt",".md",".json",".xml",".yaml",".yml",".csv",".ini",".config",
         ".cs",".vb",".fs",".cpp",".hpp",".c",".h",
-        ".py",".rb",".go",".ts",".tsx",".js",".jsx",".html",".css"
+        ".py",".rb",".go",".tsx",".js",".jsx",".html",".css"
+
     };
 }
 
@@ -236,6 +239,12 @@ MainWindow::MainWindow(QWidget *parent)
 
     refreshUiState();
     setStatus(QStringLiteral("Выберите каталог и нажмите «Собрать отчёт»."));
+
+    connect(&m_buildWatcher,
+            &QFutureWatcher<QPair<QString, QString>>::finished,
+            this,
+            &MainWindow::onBuildFinished);
+
 }
 
 MainWindow::~MainWindow()
@@ -245,11 +254,32 @@ MainWindow::~MainWindow()
 
 
 
+// void MainWindow::refreshUiState()
+// {
+//     ui->pbBuild->setEnabled(!m_rootDir.isEmpty());
+//     ui->pbSave->setEnabled(!m_reportMarkdown.isEmpty());
+// }
+
 void MainWindow::refreshUiState()
 {
-    ui->pbBuild->setEnabled(!m_rootDir.isEmpty());
-    ui->pbSave->setEnabled(!m_reportMarkdown.isEmpty());
+    const bool hasDir = !m_rootDir.isEmpty();
+    const bool hasReport = !m_reportMarkdown.isEmpty();
+
+    /** \brief Во время генерации блокируем кнопки, чтобы не было гонок. */
+    ui->pbOpen->setEnabled(!m_buildInProgress);
+    ui->pbBuild->setEnabled(!m_buildInProgress && hasDir);
+    ui->pbSave->setEnabled(!m_buildInProgress && hasReport);
+
+    // (Опционально) Можно ещё блокировать поля настроек:
+    ui->leMaxBytes->setEnabled(!m_buildInProgress);
+    ui->leMaxOutChars->setEnabled(!m_buildInProgress);
+    ui->pteIncludeExt->setEnabled(!m_buildInProgress);
+    ui->pteExcludeDir->setEnabled(!m_buildInProgress);
+    ui->cbUseCmdTree->setEnabled(!m_buildInProgress);
+    ui->cbTreeOnly->setEnabled(!m_buildInProgress);
+    ui->cbEncodingMode->setEnabled(!m_buildInProgress);
 }
+
 
 
 void MainWindow::setStatus(const QString& text)
@@ -289,11 +319,12 @@ static bool parseHumanSizeToBytesAllowZero(QString text, qint64* out, QString* e
     return parseHumanSizeToBytes(text, out, err);
 }
 
-
-
-
 void MainWindow::onBuildClicked()
 {
+    /** \brief Не запускаем генерацию повторно, если она уже идёт. */
+    if (m_buildInProgress)
+        return;
+
     if (m_rootDir.isEmpty())
     {
         QMessageBox::warning(this, QStringLiteral("Нет каталога"),
@@ -301,13 +332,9 @@ void MainWindow::onBuildClicked()
         return;
     }
 
-    // Параметры генерации. При желании можно вынести в UI.
-    // ReportGenerator::Options opt;
-    // opt.rootPath = m_rootDir;
-    // opt.includeExt = defaultIncludeExt();
-    // opt.excludeDirNames = defaultExcludeDirs();
-    // opt.maxBytes = 1024 * 1024;
-    // Параметры генерации из UI
+    // =========================
+    //  1) Считываем параметры UI
+    // =========================
     ReportGenerator::Options opt;
 
     qint64 maxOutChars = 0;
@@ -322,17 +349,13 @@ void MainWindow::onBuildClicked()
     }
     opt.maxOutChars = maxOutChars;
 
-
-
     opt.rootPath = m_rootDir;
     opt.treeOnly = ui->cbTreeOnly->isChecked();
-
 
     opt.noBomEncodingMode =
         (ui->cbEncodingMode->currentIndex() == 1)
             ? ReportGenerator::Options::NoBomEncodingMode::ForceAnsi
             : ReportGenerator::Options::NoBomEncodingMode::AutoUtf8ThenAnsi;
-
 
     qint64 maxBytes = 0;
     QString sizeErr;
@@ -346,63 +369,78 @@ void MainWindow::onBuildClicked()
     }
     opt.maxBytes = maxBytes;
 
-
-    opt.includeExt = parseUserList(ui->pteIncludeExt->toPlainText(), /*forceDotPrefix*/true,  /*toLower*/true);
+    opt.includeExt = parseUserList(ui->pteIncludeExt->toPlainText(),
+                                   /*forceDotPrefix*/true,
+                                   /*toLower*/true);
     if (opt.includeExt.isEmpty())
         opt.includeExt = defaultIncludeExt();
 
-    opt.excludeDirNames = parseUserList(ui->pteExcludeDir->toPlainText(), /*forceDotPrefix*/false, /*toLower*/true);
+    opt.excludeDirNames = parseUserList(ui->pteExcludeDir->toPlainText(),
+                                        /*forceDotPrefix*/false,
+                                        /*toLower*/true);
     if (opt.excludeDirNames.isEmpty())
         opt.excludeDirNames = defaultExcludeDirs();
 
-    // ВАЖНО:
-    // Если ты сознательно сделал инверсию — оставь как у тебя.
-    // Если нет — должно быть: opt.useCmdTree = ui->cbUseCmdTree->isChecked();
     opt.useCmdTree = ui->cbUseCmdTree->isChecked();
 
+    // =========================
+    //  2) Запускаем асинхронно
+    // =========================
 
-
-
-    ReportGenerator gen(opt);
-
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    setStatus(QStringLiteral("Генерация отчёта…"));
-
-    QString error;
-    const QString report = gen.generate(&error);
-
-    QApplication::restoreOverrideCursor();
-
-    if (report.isEmpty() && !error.isEmpty())
-    {
-        QMessageBox::critical(this, QStringLiteral("Ошибка"), error);
-        setStatus(error);
-        return;
-    }
-
-    if (!error.isEmpty())
-    {
-        // Ошибка не критична (например, tree не запустился), отчёт всё равно сгенерирован.
-        setStatus(QStringLiteral("Отчёт сгенерирован с предупреждением: %1").arg(error));
-    }
-    else
-    {
-        setStatus(QStringLiteral("Отчёт готов."));
-    }
-
- //   ui->teReprt->setPlainText(report);
-
-    m_reportMarkdown = report;
-
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-    ui->teReprt->setMarkdown(m_reportMarkdown);
-#else
-    ui->teReprt->setPlainText(m_reportMarkdown); // fallback если Qt старый
-#endif
-
-
+    m_buildInProgress = true;
+    m_cancelRequested.store(false, std::memory_order_relaxed);
     refreshUiState();
+
+    // На всякий случай, если диалог уже был (например, из-за нестандартных сценариев)
+    if (m_progress)
+    {
+        m_progress->hide();
+        m_progress->deleteLater();
+        m_progress = nullptr;
+    }
+
+    /** \brief Спиннер/диалог прогресса с кнопкой отмены. */
+    m_progress = new QProgressDialog(tr("Генерация отчёта…"),
+                                     tr("Отмена"),
+                                     0, 0,
+                                     this);
+    m_progress->setWindowModality(Qt::WindowModal);
+    m_progress->setMinimumDuration(0);
+    m_progress->setAutoClose(false);
+    m_progress->setAutoReset(false);
+
+    connect(m_progress, &QProgressDialog::canceled, this, [this]() {
+        /** \brief Кооперативная отмена — генератор периодически проверяет флаг. */
+        m_cancelRequested.store(true, std::memory_order_relaxed);
+        setStatus(QStringLiteral("Отмена…"));
+    });
+
+    m_progress->show();
+
+    // Передаём генератору флаг отмены (важно: указатель должен жить дольше генерации)
+    opt.cancelRequested = &m_cancelRequested;
+
+    setStatus(QStringLiteral("Генерация отчёта…"));
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+
+    using Result = QPair<QString, QString>; // (report, error)
+
+    /** \brief Фоновая генерация отчёта.
+     *  \details opt копируется по значению, внутри будет создаваться ReportGenerator.
+     */
+    auto future = QtConcurrent::run([opt]() -> Result {
+        ReportGenerator gen(opt);
+        QString error;
+        const QString report = gen.generate(&error);
+        return qMakePair(report, error);
+    });
+
+    /** \brief Завершение обработается в onBuildFinished() (через QFutureWatcher::finished). */
+    m_buildWatcher.setFuture(future);
 }
+
+
+
 
 void MainWindow::onSaveClicked()
 {
@@ -485,3 +523,52 @@ void MainWindow::onReportContextMenuRequested(const QPoint& pos)
     menu.exec(ui->teReprt->mapToGlobal(pos));
 }
 
+void MainWindow::onBuildFinished()
+{
+    QApplication::restoreOverrideCursor();
+
+    if (m_progress)
+    {
+        m_progress->hide();
+        m_progress->deleteLater();
+        m_progress = nullptr;
+    }
+
+    m_buildInProgress = false;
+
+    const auto result = m_buildWatcher.result();
+    const QString report = result.first;
+    const QString error  = result.second;
+
+    if (report.isEmpty() && !error.isEmpty())
+    {
+        // Отмена или ошибка
+        if (error.contains(QStringLiteral("Отменено"), Qt::CaseInsensitive))
+        {
+            setStatus(QStringLiteral("Отменено пользователем."));
+        }
+        else
+        {
+            QMessageBox::critical(this, QStringLiteral("Ошибка"), error);
+            setStatus(error);
+        }
+
+        refreshUiState();
+        return;
+    }
+
+    if (!error.isEmpty())
+        setStatus(QStringLiteral("Отчёт сгенерирован с предупреждением: %1").arg(error));
+    else
+        setStatus(QStringLiteral("Отчёт готов."));
+
+    m_reportMarkdown = report;
+
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+    ui->teReprt->setMarkdown(m_reportMarkdown);
+#else
+    ui->teReprt->setPlainText(m_reportMarkdown);
+#endif
+
+    refreshUiState();
+}
